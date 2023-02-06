@@ -21,8 +21,8 @@ class Database():
     :param key: int             #Index of table key in columns
     """
     def create_table(self, name, num_columns, key_index):
-        table = store.sum_as_string(1,2)
-        print(table)
+        # table = store.sum_as_string(1,2)
+        # print(table)
         table = Table(name, num_columns, key_index)
         return table
 
