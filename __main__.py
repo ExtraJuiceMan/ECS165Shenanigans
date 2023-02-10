@@ -9,7 +9,7 @@ print(type(db))
 db.create_table('fisrt', 5, 0)
 grades_table = db.get_table('fisrt')
 print(grades_table)
-# query = Query(grades_table)
+query = Query(grades_table)
 # keys = []
 
 # insert_time_0 = process_time()

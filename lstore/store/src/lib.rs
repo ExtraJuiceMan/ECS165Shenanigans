@@ -1,25 +1,129 @@
 use std::collections::HashMap;
 // use std::io::{Write, BufReader, BufRead, ErrorKind};
 use pyo3::prelude::*;
+use pyo3::types::PyTuple;
 
-// #[pyclass(subclass)]
-// struct Index{
-//     indices: Vec<i64>,
-// }
+#[derive(Clone, Debug, Default)]
+#[pyclass(subclass)]
+struct Api {
+    table: Table,
+}
 
-// #[pymethods]
-// impl Index{
-//     #[new]
-//     #[allow(clippy::too_many_arguments)]
-//     pub fn new(
-//     ) -> PyResult<Self>{
+#[pymethods]
+impl Api {
+    #[new]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(table: Table,) -> PyResult<Self> {
+        Ok(Api {table,})
+    }
+    // pub fn delete(&self, primary_key){
 
-//         Ok(Index {
-//             indices: Vec::new(),
-//         })
-//     }
+    // }
+    #[pyo3(signature = (*column))]
+    pub fn insert(&mut self, column: &PyTuple){
+        
+    }
 
-// }
+    // pub fn select(&self, search_key, search_key_index, projected_columns_index){
+        
+    // }
+
+    // pub fn select_version(&self, search_key, search_key_index, projected_columns_index, relative_version){
+        
+    // }
+
+    // pub fn update(&self, primary_key, *columns){
+        
+    // }
+
+    // pub fn sum(&self, start_range, end_range, aggregate_column_index){
+        
+    // }
+
+    // pub fn sum_version(&self, start_range, end_range, aggregate_column_index, relative_version){
+        
+    // }
+
+    // pub fn increment(&self, key, column){
+        
+    // }
+}
+
+#[derive(Clone, Debug, Default)]
+#[pyclass(subclass)]
+struct Index{
+    indices: HashMap<i64,HashMap<i64, Vec<i64>>>,
+}
+
+#[pymethods]
+impl Index{
+    #[new]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+    ) -> PyResult<Self>{
+
+        Ok(Index {
+            indices: HashMap::new(),
+        })
+    }
+
+    pub fn create_index(&mut self, column_number: i64){
+
+    }
+
+    pub fn drop_index(&mut self, column_number: i64){
+
+    }
+
+}
+
+#[derive(Clone, Debug, Default)]
+#[pyclass(subclass)]
+struct Page{
+    num_columns: u64,
+    data: Vec<[i64;1000]>,
+}
+
+#[pymethods]
+impl Page{
+    #[new]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+    ) -> PyResult<Self>{
+
+        Ok(Page {
+            num_columns: 0,
+            data: Vec::new(),
+        })
+    }
+
+}
+
+#[derive(Clone, Debug, Default)]
+#[pyclass(subclass)]
+struct Record{
+    rid: i64,
+    indirection:i64,
+    schema_encoding: Vec<i64>,
+    row: Vec<&i64>,
+}
+
+#[pymethods]
+impl Record{
+    #[new]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+    ) -> PyResult<Self>{
+
+        Ok(Record {
+            rid: 0,
+            indirection: 0,
+            schema_encoding: Vec::new(),
+            row: Vec::new(),
+        })
+    }
+
+}
 
 #[derive(Clone, Debug, Default)]
 #[pyclass(subclass)]
@@ -28,18 +132,18 @@ struct Table{
     num_columns: u64,
     key: i64,
     index: u64,
-    page_directory: HashMap<i64,i64>,
+    page_directory: HashMap<i64,Record>,
 }
 
 #[pymethods]
-impl Table{
+impl Table {
     #[new]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         num_columns: u64,
         key: i64,
-    ) -> Table{
+    ) -> Table {
         Table {
             name,
             num_columns,
@@ -49,7 +153,7 @@ impl Table{
         }
     }
 
-    pub fn print(&self){
+    pub fn print(&self) {
         println!("{}",self.name);
         println!("{}",self.num_columns);
         println!("{}",self.key);
@@ -99,6 +203,7 @@ impl Rstore{
 #[pymodule]
 fn store(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Rstore>()?;
+    m.add_class::<Api>()?;
     // m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
     Ok(())
 }
