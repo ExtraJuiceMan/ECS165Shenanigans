@@ -1,7 +1,4 @@
-use pyo3::{
-    prelude::*,
-    types::{PyList, PyTuple},
-};
+use pyo3::{prelude::*, types::PyTuple};
 use std::cell::RefCell;
 use std::{borrow::Borrow, mem::size_of};
 use std::{cell::Cell, collections::HashMap};
@@ -50,7 +47,17 @@ impl From<u64> for RID {
 struct Index {
     indices: HashMap<i64, HashMap<i64, Vec<i64>>>,
 }
-
+impl fmt::Display for Index {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (key1, value) in self.indices.iter() {
+            write!(f, "key: {}, value: \n", key1)?;
+            for (key2, value2) in value.iter() {
+                write!(f, "key: {}, value: {:?}\n", key2, value2)?;
+            }
+        }
+        write!(f, "{}", 0)
+    }
+}
 impl Index {
     pub fn new() -> Self {
         Index {
@@ -163,7 +170,7 @@ struct Table {
     name: String,
     num_columns: usize,
     key_index: usize,
-    index: u64,
+    index: Index,
     next_rid: Cell<RID>,
     ranges: Vec<PageRange>,
 }
@@ -182,7 +189,7 @@ impl Table {
             name,
             num_columns,
             key_index,
-            index: 0,
+            index: Index::new(),
             next_rid: Cell::new(RID::new(0)),
             ranges: Vec::new(),
         }
