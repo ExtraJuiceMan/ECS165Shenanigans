@@ -119,18 +119,13 @@ struct Record {
 #[pymethods]
 impl Record {
     #[new]
-    pub fn new(
-        rid: u64,
-        indirection: u64,
-        schema_encoding: u64,
-        columns: Py<PyList>,
-    ) -> PyResult<Self> {
-        Ok(Record {
+    pub fn new(rid: u64, indirection: u64, schema_encoding: u64, columns: Py<PyList>) -> Self {
+        Record {
             rid: 0,
             indirection: 0,
             schema_encoding: 0,
             columns,
-        })
+        }
     }
 }
 
@@ -209,7 +204,7 @@ struct Table {
     num_columns: usize,
     key_index: usize,
     index: Index,
-    next_rid: Cell<RID>,
+    next_rid: RID,
     ranges: Vec<PageRange>,
 }
 
@@ -228,71 +223,64 @@ impl Table {
             num_columns,
             key_index,
             index: Index::new(key_index, num_columns),
-            next_rid: Cell::new(RID::new(0)),
+            next_rid: 0.into(),
             ranges: Vec::new(),
         }
     }
 
-    pub fn select(
-        &mut self,
-        search_value: i64,
-        column_index: usize,
-        columns: &PyList,
-    ) -> Py<PyList> {
-        Python::with_gil(|py| -> Py<PyList> {
-            let included_columns: Vec<usize> = columns
-                .iter()
-                .enumerate()
-                .filter(|(_i, x)| x.extract::<i64>().unwrap() != 0)
-                .map(|(i, _x)| i)
-                .collect();
-            let results: &PyList = PyList::empty(py);
-            let mut rid: RID = RID::new(0);
+    pub fn select(&self, search_value: i64, column_index: usize, columns: &PyList) -> Py<PyList> {
+        let selected_records = Python::with_gil(|py| -> Py<PyList> { PyList::empty(py).into() });
 
-            while rid.raw() < self.next_rid.get().raw() {
-                let page = self.get_page_range(rid.page_range()).get_page(rid.page());
+        let included_columns: Vec<usize> = columns
+            .iter()
+            .enumerate()
+            .filter(|(_i, x)| x.extract::<i64>().unwrap() != 0)
+            .map(|(i, _x)| i)
+            .collect();
 
-                if page
-                    .get_column(NUM_METADATA_COLUMNS + column_index)
-                    .slot(rid.slot())
-                    != search_value
-                {
-                    rid = rid.next();
-                    continue;
-                }
+        let mut rid: RID = 0.into();
 
+        while rid.raw() < self.next_rid.raw() {
+            let page = self.get_page_range(rid.page_range()).get_page(rid.page());
+
+            if page
+                .get_column(NUM_METADATA_COLUMNS + column_index)
+                .slot(rid.slot())
+                != search_value
+            {
+                rid = rid.next();
+                continue;
+            }
+
+            Python::with_gil(|py| {
                 let result_cols = PyList::empty(py);
-
                 for i in included_columns.iter() {
                     result_cols.append(page.get_column(NUM_METADATA_COLUMNS + i).slot(rid.slot()));
                 }
 
-                results
-                    .append(
-                        PyCell::new(
-                            py,
-                            Record::new(
-                                page.get_column(METADATA_RID).slot(rid.slot()) as u64,
-                                page.get_column(METADATA_INDIRECTION).slot(rid.slot()) as u64,
-                                page.get_column(METADATA_SCHEMA_ENCODING).slot(rid.slot()) as u64,
-                                result_cols.into(),
-                            )
-                            .unwrap(),
-                        )
-                        .unwrap(),
-                    )
-                    .unwrap();
+                let record = PyCell::new(
+                    py,
+                    Record::new(
+                        page.get_column(METADATA_RID).slot(rid.slot()) as u64,
+                        page.get_column(METADATA_INDIRECTION).slot(rid.slot()) as u64,
+                        page.get_column(METADATA_SCHEMA_ENCODING).slot(rid.slot()) as u64,
+                        result_cols.into(),
+                    ),
+                )
+                .unwrap();
 
-                rid = rid.next();
-            }
+                selected_records.as_ref(py).append(record);
+            });
 
-            results.into()
-        })
+            rid = rid.next();
+        }
+
+        selected_records
     }
 
     #[args(values = "*")]
     pub fn insert(&mut self, values: &PyTuple) {
-        let rid: RID = self.next_rid.get();
+        let rid: RID = self.next_rid;
         let page_range = rid.page_range();
         let page = rid.page();
         let slot = rid.slot();
@@ -318,7 +306,7 @@ impl Table {
             rid,
         );
 
-        self.next_rid.set(rid.next());
+        self.next_rid = rid.next();
     }
 
     pub fn print(&self) {
