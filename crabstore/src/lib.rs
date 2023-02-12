@@ -228,6 +228,29 @@ impl Table {
         }
     }
 
+    pub fn sum(&self, start_range: i64, end_range: i64, column_index: usize) -> i64 {
+        let mut rid: RID = 0.into();
+        let mut sum: i64 = 0;
+
+        while rid.raw() < self.next_rid.raw() {
+            let page = self.get_page_range(rid.page_range()).get_page(rid.page());
+
+            let key = page
+                .get_column(NUM_METADATA_COLUMNS + self.key_index)
+                .slot(rid.slot());
+
+            if key >= start_range && key < end_range {
+                sum += page
+                    .get_column(NUM_METADATA_COLUMNS + column_index)
+                    .slot(rid.slot());
+            }
+
+            rid = rid.next();
+        }
+
+        sum
+    }
+
     pub fn select(&self, search_value: i64, column_index: usize, columns: &PyList) -> Py<PyList> {
         let selected_records = Python::with_gil(|py| -> Py<PyList> { PyList::empty(py).into() });
 
