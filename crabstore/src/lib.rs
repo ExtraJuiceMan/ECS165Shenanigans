@@ -3,7 +3,7 @@ use pyo3::{
     prelude::*,
     types::{PyList, PyTuple},
 };
-use std::{borrow::Borrow, cell::RefCell, mem::size_of};
+use std::{borrow::Borrow, cell::RefCell, mem::size_of, slice::SliceIndex};
 use std::{cell::Cell, collections::BTreeMap, collections::HashMap};
 
 const PAGE_SIZE: usize = 4096;
@@ -58,32 +58,52 @@ impl From<u64> for RID {
 #[pyclass(subclass)]
 //change to BTreeMap when we need to implement ranges
 struct Index {
-    indices: HashMap<usize, HashMap<i64, Vec<RID>>>,
+    indices: Vec<Option<HashMap<i64, Vec<RID>>>>,
 }
 impl fmt::Display for Index {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (key1, value) in self.indices.iter() {
-            write!(f, "key: {}, value: \n", key1)?;
-            for (key2, value2) in value.iter() {
-                write!(f, "key: {}, value: {:?}\n", key2, value2)?;
+        for (i, v) in self.indices.iter().enumerate() {
+            write!(f, "Index on Column {}:\n", i);
+            match v {
+                Some(v) => {
+                    for (key, value) in v.iter() {
+                        write!(f, "Key: {} | Value: {:?}\n", key, value)?;
+                    }
+                }
+                None => {
+                    write!(f, "None\n");
+                }
             }
         }
-        write!(f, "{}", 0)
+
+        Ok(())
     }
 }
 impl Index {
-    pub fn new(key_index: usize) -> Self{
-        let mut map: HashMap<usize, HashMap<i64, Vec<RID>>> = HashMap::new();
-        map.insert(key_index, HashMap::new());
-        Index { indices: map }
+    pub fn new(key_index: usize, num_columns: usize) -> Self {
+        let mut indices = Vec::with_capacity(num_columns);
+        indices.resize_with(num_columns, Default::default);
+        indices[key_index] = Some(HashMap::new());
+
+        Index { indices }
+    }
+
+    pub fn update_index(&mut self, column_number: usize, value: i64, rid: RID) {
+        if let Some(ref mut index) = self.indices[column_number] {
+            if let Some(ref mut rids) = index.get_mut(&value) {
+                rids.push(rid);
+            } else {
+                index.insert(value, vec![rid]);
+            }
+        }
     }
 
     pub fn create_index(&mut self, column_number: usize) {
-        self.indices.insert(column_number, HashMap::new());
+        self.indices[column_number] = Some(HashMap::new());
     }
 
     pub fn drop_index(&mut self, column_number: usize) {
-        self.indices.remove(&column_number);
+        self.indices[column_number] = None;
     }
 }
 
@@ -207,7 +227,7 @@ impl Table {
             name,
             num_columns,
             key_index,
-            index: Index::new(key_index),
+            index: Index::new(key_index, num_columns),
             next_rid: Cell::new(RID::new(0)),
             ranges: Vec::new(),
         }
@@ -286,20 +306,19 @@ impl Table {
 
         page.get_column(METADATA_RID)
             .write_slot(slot, rid.raw() as i64);
-        let rust_vals: Vec<i64> = values.extract().unwrap();
+
         for (i, val) in values.iter().enumerate() {
             page.get_column(NUM_METADATA_COLUMNS + i)
                 .write_slot(slot, val.extract().unwrap())
         }
-        
-        let key_index = self.key_index.clone();
-        let key = rust_vals[key_index].clone();
-        let mut rid_vec:Vec<RID> = Vec::new();
-        rid_vec.push(rid);
-        self.index.indices
-            .get_mut(&key_index).unwrap().insert(key, rid_vec);
-        
-            self.next_rid.set(rid.next());  
+
+        self.index.update_index(
+            self.key_index,
+            values.get_item(self.key_index).unwrap().extract().unwrap(),
+            rid,
+        );
+
+        self.next_rid.set(rid.next());
     }
 
     pub fn print(&self) {
