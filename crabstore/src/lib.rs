@@ -3,8 +3,8 @@ use pyo3::{
     prelude::*,
     types::{PyList, PyTuple},
 };
-use std::{borrow::Borrow, mem::size_of, cell::RefCell};
-use std::{cell::Cell, collections::HashMap, collections::BTreeMap};
+use std::{borrow::Borrow, cell::RefCell, mem::size_of};
+use std::{cell::Cell, collections::BTreeMap, collections::HashMap};
 
 const PAGE_SIZE: usize = 4096;
 const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
@@ -242,11 +242,6 @@ impl Table {
                 }
 
                 let result_cols = PyList::empty(py);
-                let record_indirection: u64 =
-                    page.get_column(METADATA_INDIRECTION).slot(rid.slot()) as u64;
-                let record_rid: u64 = page.get_column(METADATA_RID).slot(rid.slot()) as u64;
-                let record_schema: u64 =
-                    page.get_column(METADATA_SCHEMA_ENCODING).slot(rid.slot()) as u64;
 
                 for i in included_columns.iter() {
                     result_cols.append(page.get_column(NUM_METADATA_COLUMNS + i).slot(rid.slot()));
@@ -257,9 +252,9 @@ impl Table {
                         PyCell::new(
                             py,
                             Record::new(
-                                record_rid,
-                                record_indirection,
-                                record_schema,
+                                page.get_column(METADATA_RID).slot(rid.slot()) as u64,
+                                page.get_column(METADATA_INDIRECTION).slot(rid.slot()) as u64,
+                                page.get_column(METADATA_SCHEMA_ENCODING).slot(rid.slot()) as u64,
                                 result_cols.into(),
                             )
                             .unwrap(),
@@ -310,15 +305,15 @@ impl Table {
 
 #[derive(Clone, Debug, Default)]
 #[pyclass(subclass)]
-struct Rstore {
+struct CrabStore {
     tables: HashMap<String, Py<Table>>,
 }
 
 #[pymethods]
-impl Rstore {
+impl CrabStore {
     #[new]
     pub fn new() -> Self {
-        Rstore {
+        CrabStore {
             tables: HashMap::new(),
         }
     }
@@ -352,7 +347,7 @@ impl Rstore {
 fn store(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Record>()?;
     m.add_class::<Table>()?;
-    m.add_class::<Rstore>()?;
+    m.add_class::<CrabStore>()?;
     // m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
     Ok(())
 }
