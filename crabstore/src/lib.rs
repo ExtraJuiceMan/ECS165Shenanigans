@@ -97,7 +97,19 @@ impl Index {
             }
         }
     }
-
+    pub fn get_from_index(&self, column_number: usize, value: i64) -> Option<Vec<RID>>{
+        match &self.indices[column_number]{
+            None => {
+                None
+            },
+            Some(map) => Some({
+                match map.get(&value){
+                    None => Vec::new(),
+                    Some(rids) => rids.clone() 
+                }
+            }),
+        }
+    }
     pub fn create_index(&mut self, column_number: usize) {
         self.indices[column_number] = Some(BTreeMap::new());
     }
@@ -212,6 +224,27 @@ impl Table {
     fn get_page_range(&self, range_number: usize) -> &PageRange {
         &self.ranges[range_number]
     }
+    fn find_rows(&self, column_index:usize, value:i64) -> Vec<RID>{
+        match self.index.get_from_index(column_index, value){
+            Some(vals) => vals,
+            None => {
+                let rid:RID  = 0.into();
+                let mut rids = Vec::new();
+                while rid.raw() < self.next_rid.raw() {
+                    let page = self.get_page_range(rid.page_range()).get_page(rid.page());
+        
+                    if page
+                        .get_column(NUM_METADATA_COLUMNS + column_index)
+                        .slot(rid.slot())
+                        == value
+                    {
+                        rids.push(rid.clone());
+                    }
+                }
+                rids
+            },
+        }
+    }
 }
 
 #[pymethods]
@@ -227,7 +260,6 @@ impl Table {
             ranges: Vec::new(),
         }
     }
-
     pub fn sum(&self, start_range: i64, end_range: i64, column_index: usize) -> i64 {
         let mut rid: RID = 0.into();
         let mut sum: i64 = 0;
@@ -260,32 +292,8 @@ impl Table {
             .filter(|(_i, x)| x.extract::<i64>().unwrap() != 0)
             .map(|(i, _x)| i)
             .collect();
-
         let mut rid: RID = 0.into();
-        let vals:Vec<RID> = match &self.index.indices[column_index]{
-            None => {
-                let mut rid:RID  = 0.into();
-                let mut rids = Vec::new();
-                while rid.raw() < self.next_rid.raw() {
-                    let page = self.get_page_range(rid.page_range()).get_page(rid.page());
-        
-                    if page
-                        .get_column(NUM_METADATA_COLUMNS + column_index)
-                        .slot(rid.slot())
-                        == search_value
-                    {
-                        rids.push(rid.clone());
-                    }
-                }
-                rids
-            },
-            Some(map) => {
-                match map.get(&search_value){
-                    None => Vec::new(),
-                    Some(rids) => rids.clone() 
-                }
-            },
-        };
+        let vals:Vec<RID> = self.find_rows(column_index, search_value);
         while rid.raw() < self.next_rid.raw() {
             let page = self.get_page_range(rid.page_range()).get_page(rid.page());
 
