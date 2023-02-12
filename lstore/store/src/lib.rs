@@ -3,13 +3,8 @@ use pyo3::{
     prelude::*,
     types::{PyList, PyTuple},
 };
-use std::{borrow::Borrow, mem::size_of};
-<<<<<<< HEAD
-use std::{cell::Cell, collections::HashMap};
-use std::{cell::RefCell, result};
-=======
+use std::{borrow::Borrow, mem::size_of, cell::RefCell};
 use std::{cell::Cell, collections::HashMap, collections::BTreeMap};
->>>>>>> 1beea90287ece18ecd57d1269be8f7425eba0604
 
 const PAGE_SIZE: usize = 4096;
 const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
