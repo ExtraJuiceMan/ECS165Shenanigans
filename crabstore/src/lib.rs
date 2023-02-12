@@ -58,7 +58,7 @@ impl From<u64> for RID {
 #[pyclass(subclass)]
 //change to BTreeMap when we need to implement ranges
 struct Index {
-    indices: Vec<Option<HashMap<i64, Vec<RID>>>>,
+    indices: Vec<Option<BTreeMap<i64, Vec<RID>>>>,
 }
 impl fmt::Display for Index {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -83,7 +83,7 @@ impl Index {
     pub fn new(key_index: usize, num_columns: usize) -> Self {
         let mut indices = Vec::with_capacity(num_columns);
         indices.resize_with(num_columns, Default::default);
-        indices[key_index] = Some(HashMap::new());
+        indices[key_index] = Some(BTreeMap::new());
 
         Index { indices }
     }
@@ -99,7 +99,7 @@ impl Index {
     }
 
     pub fn create_index(&mut self, column_number: usize) {
-        self.indices[column_number] = Some(HashMap::new());
+        self.indices[column_number] = Some(BTreeMap::new());
     }
 
     pub fn drop_index(&mut self, column_number: usize) {
@@ -262,7 +262,30 @@ impl Table {
             .collect();
 
         let mut rid: RID = 0.into();
-
+        let vals:Vec<RID> = match &self.index.indices[column_index]{
+            None => {
+                let mut rid:RID  = 0.into();
+                let mut rids = Vec::new();
+                while rid.raw() < self.next_rid.raw() {
+                    let page = self.get_page_range(rid.page_range()).get_page(rid.page());
+        
+                    if page
+                        .get_column(NUM_METADATA_COLUMNS + column_index)
+                        .slot(rid.slot())
+                        == search_value
+                    {
+                        rids.push(rid.clone());
+                    }
+                }
+                rids
+            },
+            Some(map) => {
+                match map.get(&search_value){
+                    None => Vec::new(),
+                    Some(rids) => rids.clone() 
+                }
+            },
+        };
         while rid.raw() < self.next_rid.raw() {
             let page = self.get_page_range(rid.page_range()).get_page(rid.page());
 
