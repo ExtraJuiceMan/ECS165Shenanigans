@@ -3,7 +3,7 @@ use std::{borrow::Borrow, mem::size_of};
 use std::{borrow::BorrowMut, cell::RefCell};
 // use std::io::{Write, BufReader, BufRead, ErrorKind};
 use pyo3::prelude::*;
-
+use std::fmt::{self, write, Display};
 const PAGE_SIZE: usize = 4096;
 const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
 const PAGE_RANGE_SIZE: usize = PAGE_SIZE * 16;
@@ -15,7 +15,17 @@ const NUM_METADATA_COLUMNS: usize = 4;
 struct Index {
     indices: HashMap<i64, HashMap<i64, Vec<i64>>>,
 }
-
+impl fmt::Display for Index{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result{
+        for (key1, value) in self.indices.iter() {
+            write!(f, "key: {}, value: \n", key1)?;
+            for (key2, value2) in value.iter(){
+                write!(f,"key: {}, value: {:?}\n", key2, value2)?;
+            }
+        }
+        write!(f, "{}", 0)
+    }
+}
 impl Index {
     pub fn new() -> Self {
         Index {
@@ -123,7 +133,7 @@ struct Table {
     name: String,
     num_columns: u64,
     key_index: usize,
-    index: u64,
+    index: Index,
     page_directory: HashMap<usize, PageRange>,
 }
 
@@ -141,7 +151,7 @@ impl Table {
             name,
             num_columns,
             key_index,
-            index: 0,
+            index: Index::new(),
             page_directory: HashMap::new(),
         }
     }
