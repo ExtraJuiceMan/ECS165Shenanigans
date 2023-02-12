@@ -1,18 +1,17 @@
-# from lstore.table import Table, Record
-# from lstore.index import Index
+from lstore.table import Table, Record
+from lstore.index import Index
 
 
-
-def Query(table):
+class Query:
     """
     # Creates a Query object that can perform different queries on the specified table 
     Queries that fail must return False
     Queries that succeed should return the result or True
     Any query that crashes (due to exceptions) should return False
     """
-    # def __init__(self, table):
-    #     self.table = table
-    #     pass
+    def __init__(self, table):
+        self.table = table
+        pass
 
     
     """
@@ -21,8 +20,8 @@ def Query(table):
     # Returns True upon succesful deletion
     # Return False if record doesn't exist or is locked due to 2PL
     """
-    # def delete(self, primary_key):
-    #     pass
+    def delete(self, primary_key):
+        pass
     
     
     """
@@ -30,9 +29,8 @@ def Query(table):
     # Return True upon succesful insertion
     # Returns False if insert fails for whatever reason
     """
-    # def insert(self, *columns):
-    #     schema_encoding = '0' * self.table.num_columns
-    #     pass
+    def insert(self, *columns):
+        self.table.insert(*columns)
 
     
     """
@@ -44,8 +42,8 @@ def Query(table):
     # Returns False if record locked by TPL
     # Assume that select will never be called on a key that doesn't exist
     """
-    # def select(self, search_key, search_key_index, projected_columns_index):
-    #     pass
+    def select(self, search_key, search_key_index, projected_columns_index):
+        pass
 
     
     """
@@ -58,8 +56,8 @@ def Query(table):
     # Returns False if record locked by TPL
     # Assume that select will never be called on a key that doesn't exist
     """
-    # def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
-    #     pass
+    def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
+        pass
 
     
     """
@@ -67,8 +65,8 @@ def Query(table):
     # Returns True if update is succesful
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking
     """
-    # def update(self, primary_key, *columns):
-    #     pass
+    def update(self, primary_key, *columns):
+        pass
 
     
     """
@@ -79,8 +77,8 @@ def Query(table):
     # Returns the summation of the given range upon success
     # Returns False if no record exists in the given range
     """
-    # def sum(self, start_range, end_range, aggregate_column_index):
-    #     pass
+    def sum(self, start_range, end_range, aggregate_column_index):
+        pass
 
     
     """
@@ -92,8 +90,8 @@ def Query(table):
     # Returns the summation of the given range upon success
     # Returns False if no record exists in the given range
     """
-    # def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
-    #     pass
+    def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
+        pass
 
     
     """
@@ -104,11 +102,11 @@ def Query(table):
     # Returns True is increment is successful
     # Returns False if no record matches key or if target record is locked by 2PL.
     """
-    # def increment(self, key, column):
-    #     r = self.select(key, self.table.key, [1] * self.table.num_columns)[0]
-    #     if r is not False:
-    #         updated_columns = [None] * self.table.num_columns
-    #         updated_columns[column] = r[column] + 1
-    #         u = self.update(key, *updated_columns)
-    #         return u
-    #     return False
+    def increment(self, key, column):
+        r = self.select(key, self.table.key, [1] * self.table.num_columns)[0]
+        if r is not False:
+            updated_columns = [None] * self.table.num_columns
+            updated_columns[column] = r[column] + 1
+            u = self.update(key, *updated_columns)
+            return u
+        return False
