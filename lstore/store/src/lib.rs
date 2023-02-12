@@ -4,8 +4,12 @@ use pyo3::{
     types::{PyList, PyTuple},
 };
 use std::{borrow::Borrow, mem::size_of};
+<<<<<<< HEAD
 use std::{cell::Cell, collections::HashMap};
 use std::{cell::RefCell, result};
+=======
+use std::{cell::Cell, collections::HashMap, collections::BTreeMap};
+>>>>>>> 1beea90287ece18ecd57d1269be8f7425eba0604
 
 const PAGE_SIZE: usize = 4096;
 const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
@@ -57,6 +61,7 @@ impl From<u64> for RID {
 
 #[derive(Clone, Debug, Default)]
 #[pyclass(subclass)]
+//change to BTreeMap when we need to implement ranges
 struct Index {
     indices: HashMap<i64, HashMap<i64, Vec<i64>>>,
 }
@@ -78,9 +83,13 @@ impl Index {
         }
     }
 
-    pub fn create_index(&mut self, column_number: i64) {}
+    pub fn create_index(&mut self, column_number: i64) {
+        self.indices.insert(column_number, HashMap::new());
+    }
 
-    pub fn drop_index(&mut self, column_number: i64) {}
+    pub fn drop_index(&mut self, column_number: i64) {
+        self.indices.remove(&column_number);
+    }
 }
 
 #[derive(Clone, Debug)]
