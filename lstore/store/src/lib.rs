@@ -1,4 +1,8 @@
-use pyo3::{prelude::*, types::PyTuple};
+use core::fmt;
+use pyo3::{
+    prelude::*,
+    types::{PyLong, PyTuple},
+};
 use std::cell::RefCell;
 use std::{borrow::Borrow, mem::size_of};
 use std::{cell::Cell, collections::HashMap};
@@ -33,6 +37,10 @@ impl RID {
 
     fn page_range(&self) -> usize {
         (self.rid >> 13) as usize
+    }
+
+    fn raw(&self) -> u64 {
+        self.rid
     }
 }
 
