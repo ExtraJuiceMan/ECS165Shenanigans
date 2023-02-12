@@ -5,7 +5,7 @@ use pyo3::{
 };
 use std::cell::RefCell;
 use std::{borrow::Borrow, mem::size_of};
-use std::{cell::Cell, collections::HashMap};
+use std::{cell::Cell, collections::HashMap, collections::BTreeMap};
 
 const PAGE_SIZE: usize = 4096;
 const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
@@ -52,6 +52,7 @@ impl From<u64> for RID {
 
 #[derive(Clone, Debug, Default)]
 #[pyclass(subclass)]
+//change to BTreeMap when we need to implement ranges
 struct Index {
     indices: HashMap<i64, HashMap<i64, Vec<i64>>>,
 }
@@ -73,9 +74,13 @@ impl Index {
         }
     }
 
-    pub fn create_index(&mut self, column_number: i64) {}
+    pub fn create_index(&mut self, column_number: i64) {
+        self.indices.insert(column_number, HashMap::new());
+    }
 
-    pub fn drop_index(&mut self, column_number: i64) {}
+    pub fn drop_index(&mut self, column_number: i64) {
+        self.indices.remove(&column_number);
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -144,8 +149,8 @@ impl Page {
 
 #[derive(Debug)]
 struct PageRange {
-    write_offset: Cell<usize>,
-    tail_offset: Cell<usize>,
+    write_offset: usize,
+    tail_offset: usize,
     base_pages: Vec<Page>,
     tail_pages: Vec<Page>,
 }
@@ -160,8 +165,8 @@ impl PageRange {
         }
 
         PageRange {
-            write_offset: Cell::new(0),
-            tail_offset: Cell::new(0),
+            write_offset: 0,
+            tail_offset: 0,
             base_pages,
             tail_pages,
         }
