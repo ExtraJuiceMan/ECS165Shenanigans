@@ -6,8 +6,9 @@ from random import choice, randrange
 # Student Id and 4 grades
 db = Database()
 print(type(db))
-db.create_table('fisrt', 5, 0)
-grades_table = db.get_table('fisrt')
+grades_table = db.create_table('Grades', 5, 0)
+print(grades_table)
+grades_table2 = db.get_table('Grades')
 print(grades_table)
 query = Query(grades_table)
 # keys = []

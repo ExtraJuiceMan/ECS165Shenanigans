@@ -1,209 +1,200 @@
 use std::collections::HashMap;
+use std::{borrow::Borrow, mem::size_of};
+use std::{borrow::BorrowMut, cell::RefCell};
 // use std::io::{Write, BufReader, BufRead, ErrorKind};
 use pyo3::prelude::*;
-use pyo3::types::PyTuple;
+
+const PAGE_SIZE: usize = 4096;
+const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
+const PAGE_RANGE_SIZE: usize = PAGE_SIZE * 16;
+const RANGE_PAGE_COUNT: usize = PAGE_RANGE_SIZE / PAGE_SIZE;
+const NUM_METADATA_COLUMNS: usize = 4;
 
 #[derive(Clone, Debug, Default)]
 #[pyclass(subclass)]
-struct Api {
-    table: Table,
+struct Index {
+    indices: HashMap<i64, HashMap<i64, Vec<i64>>>,
 }
 
-#[pymethods]
-impl Api {
-    #[new]
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(table: Table,) -> PyResult<Self> {
-        Ok(Api {table,})
-    }
-    // pub fn delete(&self, primary_key){
-
-    // }
-    #[pyo3(signature = (*column))]
-    pub fn insert(&mut self, column: &PyTuple){
-        
-    }
-
-    // pub fn select(&self, search_key, search_key_index, projected_columns_index){
-        
-    // }
-
-    // pub fn select_version(&self, search_key, search_key_index, projected_columns_index, relative_version){
-        
-    // }
-
-    // pub fn update(&self, primary_key, *columns){
-        
-    // }
-
-    // pub fn sum(&self, start_range, end_range, aggregate_column_index){
-        
-    // }
-
-    // pub fn sum_version(&self, start_range, end_range, aggregate_column_index, relative_version){
-        
-    // }
-
-    // pub fn increment(&self, key, column){
-        
-    // }
-}
-
-#[derive(Clone, Debug, Default)]
-#[pyclass(subclass)]
-struct Index{
-    indices: HashMap<i64,HashMap<i64, Vec<i64>>>,
-}
-
-#[pymethods]
-impl Index{
-    #[new]
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-    ) -> PyResult<Self>{
-
-        Ok(Index {
+impl Index {
+    pub fn new() -> Self {
+        Index {
             indices: HashMap::new(),
-        })
+        }
     }
 
-    pub fn create_index(&mut self, column_number: i64){
+    pub fn create_index(&mut self, column_number: i64) {}
 
-    }
-
-    pub fn drop_index(&mut self, column_number: i64){
-
-    }
-
+    pub fn drop_index(&mut self, column_number: i64) {}
 }
 
 #[derive(Clone, Debug, Default)]
 #[pyclass(subclass)]
-struct Page{
-    num_columns: u64,
-    data: Vec<[i64;1000]>,
+struct Record {
+    rid: u64,
+    indirection: u64,
+    schema_encoding: u64,
+    row: Vec<i64>,
 }
 
 #[pymethods]
-impl Page{
+impl Record {
     #[new]
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-    ) -> PyResult<Self>{
-
-        Ok(Page {
-            num_columns: 0,
-            data: Vec::new(),
-        })
-    }
-
-}
-
-#[derive(Clone, Debug, Default)]
-#[pyclass(subclass)]
-struct Record{
-    rid: i64,
-    indirection:i64,
-    schema_encoding: Vec<i64>,
-    row: Vec<&i64>,
-}
-
-#[pymethods]
-impl Record{
-    #[new]
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-    ) -> PyResult<Self>{
-
+    pub fn new() -> PyResult<Self> {
         Ok(Record {
             rid: 0,
             indirection: 0,
-            schema_encoding: Vec::new(),
+            schema_encoding: 0,
             row: Vec::new(),
         })
     }
-
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Debug)]
+struct PhysicalPage {
+    page: RefCell<[i64; PAGE_SLOTS]>,
+}
+
+impl Default for PhysicalPage {
+    fn default() -> Self {
+        PhysicalPage {
+            page: RefCell::new([0; PAGE_SLOTS]),
+        }
+    }
+}
+
+impl PhysicalPage {
+    fn slot(&self, index: usize) -> i64 {
+        self.page.borrow()[index]
+    }
+
+    fn write_slot(&self, index: usize, value: i64) {
+        self.page.borrow_mut()[index] = value;
+    }
+}
+
+#[derive(Debug)]
+struct Page {
+    columns: Box<[PhysicalPage]>,
+}
+
+impl Page {
+    pub fn new(num_columns: usize) -> Self {
+        let columns: Box<[PhysicalPage]> =
+            Vec::with_capacity(NUM_METADATA_COLUMNS + num_columns).into_boxed_slice();
+
+        Page { columns }
+    }
+
+    pub fn get_column(&self, index: usize) -> &PhysicalPage {
+        self.columns.as_ref()[index].borrow()
+    }
+}
+
+#[derive(Debug)]
+struct PageRange {
+    base_pages: Vec<Page>,
+    tail_pages: Vec<Page>,
+}
+
+impl PageRange {
+    pub fn new(num_columns: usize) -> Self {
+        let tail_pages: Vec<Page> = vec![Page::new(num_columns)];
+        let mut base_pages: Vec<Page> = Vec::new();
+
+        for _ in 0..RANGE_PAGE_COUNT {
+            base_pages.push(Page::new(num_columns));
+        }
+
+        PageRange {
+            base_pages,
+            tail_pages,
+        }
+    }
+
+    pub fn get_page(&self, page_num: usize) -> &Page {
+        &self.base_pages[page_num]
+    }
+}
+
+#[derive(Debug, Default)]
 #[pyclass(subclass)]
-struct Table{
+struct Table {
     name: String,
     num_columns: u64,
-    key: i64,
+    key_index: usize,
     index: u64,
-    page_directory: HashMap<i64,Record>,
+    page_directory: HashMap<usize, PageRange>,
+}
+
+impl Table {
+    fn get_page_range(&self, range_number: usize) -> &PageRange {
+        self.page_directory.get(&range_number).unwrap()
+    }
 }
 
 #[pymethods]
 impl Table {
     #[new]
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        name: String,
-        num_columns: u64,
-        key: i64,
-    ) -> Table {
+    pub fn new(name: String, num_columns: u64, key_index: usize) -> Table {
         Table {
             name,
             num_columns,
-            key,
+            key_index,
             index: 0,
             page_directory: HashMap::new(),
         }
     }
 
     pub fn print(&self) {
-        println!("{}",self.name);
-        println!("{}",self.num_columns);
-        println!("{}",self.key);
-        println!("{}",self.index);
-        println!("{}",self.page_directory.is_empty());
+        println!("{}", self.name);
+        println!("{}", self.num_columns);
+        println!("{}", self.key_index);
+        println!("{}", self.index);
+        println!("{}", self.page_directory.is_empty());
     }
 }
 
 #[derive(Clone, Debug, Default)]
 #[pyclass(subclass)]
-struct Rstore{
-    tables: HashMap<String, Table>,
+struct Rstore {
+    tables: HashMap<String, Py<Table>>,
 }
 
 #[pymethods]
-impl Rstore{
+impl Rstore {
     #[new]
-    #[allow(clippy::too_many_arguments)]
-    pub fn new() -> PyResult<Self>{
-
-        Ok(Rstore {
+    pub fn new() -> Self {
+        Rstore {
             tables: HashMap::new(),
+        }
+    }
+
+    pub fn create_table(&mut self, name: String, num_columns: u64, key_index: usize) -> Py<Table> {
+        Python::with_gil(|py| -> Py<Table> {
+            let table: Py<Table> =
+                Py::new(py, Table::new(name.clone(), num_columns, key_index)).unwrap();
+            self.tables.insert(name.clone(), Py::clone_ref(&table, py));
+            table
         })
     }
 
-    pub fn create_table(&mut self, name: String, num_columns: u64, index: i64){
-        let table: Table = Table::new(name.clone(), num_columns, index);
-        self.tables.insert(name, table);
-    }
-
-    pub fn drop_table(&mut self, name: String){
+    pub fn drop_table(&mut self, name: String) -> PyResult<()> {
         self.tables.remove(&name);
+        Ok(())
     }
 
-    pub fn get_table(&self, name: String) -> PyResult<Table>{
-        let table: &Table= self.tables.get(&name).unwrap();
-        Ok(table.clone())
+    pub fn get_table(&self, name: String) -> Py<Table> {
+        Py::clone(self.tables.get(&name).unwrap())
     }
 }
-/// Formats the sum of two numbers as string.
-// #[pyfunction]
-// fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
-//     Ok((a + b).to_string())
-// }
 
 /// A Python module implemented in Rust.
 #[pymodule]
 fn store(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<Record>()?;
+    m.add_class::<Table>()?;
     m.add_class::<Rstore>()?;
-    m.add_class::<Api>()?;
     // m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
     Ok(())
 }

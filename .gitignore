@@ -1,0 +1,6 @@
+.github
+.env
+.vs
+.vscode
+__pycache__
+target

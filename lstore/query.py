@@ -1,11 +1,9 @@
 # from lstore.table import Table, Record
 # from lstore.index import Index
 
-from store import Fetch
 
 
 def Query(table):
-    return Fetch(table)
     """
     # Creates a Query object that can perform different queries on the specified table 
     Queries that fail must return False
