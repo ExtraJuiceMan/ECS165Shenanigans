@@ -58,7 +58,7 @@ impl From<u64> for RID {
 #[pyclass(subclass)]
 //change to BTreeMap when we need to implement ranges
 struct Index {
-    indices: HashMap<i64, HashMap<i64, Vec<i64>>>,
+    indices: HashMap<usize, HashMap<i64, Vec<RID>>>,
 }
 impl fmt::Display for Index {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -72,17 +72,17 @@ impl fmt::Display for Index {
     }
 }
 impl Index {
-    pub fn new() -> Self {
-        Index {
-            indices: HashMap::new(),
-        }
+    pub fn new(key_index: usize) -> Self{
+        let mut map: HashMap<usize, HashMap<i64, Vec<RID>>> = HashMap::new();
+        map.insert(key_index, HashMap::new());
+        Index { indices: map }
     }
 
-    pub fn create_index(&mut self, column_number: i64) {
+    pub fn create_index(&mut self, column_number: usize) {
         self.indices.insert(column_number, HashMap::new());
     }
 
-    pub fn drop_index(&mut self, column_number: i64) {
+    pub fn drop_index(&mut self, column_number: usize) {
         self.indices.remove(&column_number);
     }
 }
@@ -207,7 +207,7 @@ impl Table {
             name,
             num_columns,
             key_index,
-            index: Index::new(),
+            index: Index::new(key_index),
             next_rid: Cell::new(RID::new(0)),
             ranges: Vec::new(),
         }
@@ -291,13 +291,20 @@ impl Table {
 
         page.get_column(METADATA_RID)
             .write_slot(slot, rid.raw() as i64);
-
+        let rust_vals: Vec<i64> = values.extract().unwrap();
         for (i, val) in values.iter().enumerate() {
             page.get_column(NUM_METADATA_COLUMNS + i)
                 .write_slot(slot, val.extract().unwrap())
         }
-
-        self.next_rid.set(rid.next());
+        
+        let key_index = self.key_index.clone();
+        let key = rust_vals[key_index].clone();
+        let mut rid_vec:Vec<RID> = Vec::new();
+        rid_vec.push(rid);
+        self.index.indices
+            .get_mut(&key_index).unwrap().insert(key, rid_vec);
+        
+            self.next_rid.set(rid.next());  
     }
 
     pub fn print(&self) {
