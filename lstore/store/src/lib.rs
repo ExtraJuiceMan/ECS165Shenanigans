@@ -1,17 +1,22 @@
 use core::fmt;
 use pyo3::{
     prelude::*,
-    types::{PyLong, PyTuple},
+    types::{PyList, PyTuple},
 };
-use std::cell::RefCell;
 use std::{borrow::Borrow, mem::size_of};
 use std::{cell::Cell, collections::HashMap};
+use std::{cell::RefCell, result};
 
 const PAGE_SIZE: usize = 4096;
 const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
 const PAGE_RANGE_SIZE: usize = PAGE_SIZE * 16;
 const RANGE_PAGE_COUNT: usize = PAGE_RANGE_SIZE / PAGE_SIZE;
 const NUM_METADATA_COLUMNS: usize = 4;
+
+const METADATA_INDIRECTION: usize = 0;
+const METADATA_RID: usize = 1;
+const METADATA_TIMESTAMP: usize = 2;
+const METADATA_SCHEMA_ENCODING: usize = 3;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct RID {
@@ -78,24 +83,29 @@ impl Index {
     pub fn drop_index(&mut self, column_number: i64) {}
 }
 
-#[derive(Clone, Debug, Default)]
-#[pyclass(subclass)]
+#[derive(Clone, Debug)]
+#[pyclass(subclass, get_all)]
 struct Record {
     rid: u64,
     indirection: u64,
     schema_encoding: u64,
-    row: Vec<i64>,
+    columns: Py<PyList>,
 }
 
 #[pymethods]
 impl Record {
     #[new]
-    pub fn new() -> PyResult<Self> {
+    pub fn new(
+        rid: u64,
+        indirection: u64,
+        schema_encoding: u64,
+        columns: Py<PyList>,
+    ) -> PyResult<Self> {
         Ok(Record {
             rid: 0,
             indirection: 0,
             schema_encoding: 0,
-            row: Vec::new(),
+            columns,
         })
     }
 }
@@ -144,8 +154,6 @@ impl Page {
 
 #[derive(Debug)]
 struct PageRange {
-    write_offset: Cell<usize>,
-    tail_offset: Cell<usize>,
     base_pages: Vec<Page>,
     tail_pages: Vec<Page>,
 }
@@ -160,8 +168,6 @@ impl PageRange {
         }
 
         PageRange {
-            write_offset: Cell::new(0),
-            tail_offset: Cell::new(0),
             base_pages,
             tail_pages,
         }
@@ -203,6 +209,68 @@ impl Table {
         }
     }
 
+    pub fn select(
+        &mut self,
+        search_value: i64,
+        column_index: usize,
+        columns: &PyList,
+    ) -> Py<PyList> {
+        Python::with_gil(|py| -> Py<PyList> {
+            let included_columns: Vec<usize> = columns
+                .iter()
+                .enumerate()
+                .filter(|(_i, x)| x.extract::<i64>().unwrap() != 0)
+                .map(|(i, _x)| i)
+                .collect();
+            let results: &PyList = PyList::empty(py);
+            let mut rid: RID = RID::new(0);
+
+            while rid.raw() < self.next_rid.get().raw() {
+                let page = self.get_page_range(rid.page_range()).get_page(rid.page());
+
+                if page
+                    .get_column(NUM_METADATA_COLUMNS + column_index)
+                    .slot(rid.slot())
+                    != search_value
+                {
+                    rid = rid.next();
+                    continue;
+                }
+
+                let result_cols = PyList::empty(py);
+                let record_indirection: u64 =
+                    page.get_column(METADATA_INDIRECTION).slot(rid.slot()) as u64;
+                let record_rid: u64 = page.get_column(METADATA_RID).slot(rid.slot()) as u64;
+                let record_schema: u64 =
+                    page.get_column(METADATA_SCHEMA_ENCODING).slot(rid.slot()) as u64;
+
+                for i in included_columns.iter() {
+                    result_cols.append(page.get_column(NUM_METADATA_COLUMNS + i).slot(rid.slot()));
+                }
+
+                results
+                    .append(
+                        PyCell::new(
+                            py,
+                            Record::new(
+                                record_rid,
+                                record_indirection,
+                                record_schema,
+                                result_cols.into(),
+                            )
+                            .unwrap(),
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+
+                rid = rid.next();
+            }
+
+            results.into()
+        })
+    }
+
     #[args(values = "*")]
     pub fn insert(&mut self, values: &PyTuple) {
         let rid: RID = self.next_rid.get();
@@ -216,6 +284,9 @@ impl Table {
 
         let page_range = self.get_page_range(page_range);
         let page = page_range.get_page(page);
+
+        page.get_column(METADATA_RID)
+            .write_slot(slot, rid.raw() as i64);
 
         for (i, val) in values.iter().enumerate() {
             page.get_column(NUM_METADATA_COLUMNS + i)
