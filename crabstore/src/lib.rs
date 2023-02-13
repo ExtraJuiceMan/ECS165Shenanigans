@@ -44,6 +44,21 @@ impl Record {
             columns,
         }
     }
+
+    pub fn __str__(&self) -> String {
+        let mut p = "[".to_owned();
+
+        Python::with_gil(|py| {
+            for c in self.columns.as_ref(py).iter() {
+                p.push_str(&c.extract::<i64>().unwrap().to_string());
+                p.push(',');
+            }
+        });
+
+        p.push(']');
+
+        p
+    }
 }
 
 #[derive(Clone, Debug, Default)]

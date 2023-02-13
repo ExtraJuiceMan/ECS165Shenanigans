@@ -1,7 +1,6 @@
 use core::fmt;
 use pyo3::{
     prelude::*,
-    types::{PyList, PyTuple},
 };
 use std::collections::BTreeMap;
 

@@ -7,6 +7,7 @@ use crate::{
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
 use rayon::prelude::*;
+
 #[derive(Debug, Default)]
 #[pyclass(subclass)]
 pub struct Table {
@@ -22,11 +23,37 @@ impl Table {
     fn get_page_range(&self, range_number: usize) -> &PageRange {
         &self.ranges[range_number]
     }
-    fn get_page(&self, rid: &RID) -> &Page {
-        self.get_page_range(rid.page_range()).get_page(&rid)
+
+    fn get_page_range_mut(&mut self, range_number: usize) -> &mut PageRange {
+        &mut self.ranges[range_number]
     }
-    fn get_page_mut(&mut self, rid: &RID) -> &mut Page {
-        (&mut self.ranges[rid.page_range()]).get_page_mut(&rid)
+    fn get_page(&self, rid: &RID) -> Option<&Page> {
+        self.get_page_range(rid.page_range()).get_page(rid)
+    }
+    fn get_page_mut(&mut self, rid: &RID) -> Option<&mut Page> {
+        self.ranges[rid.page_range()].get_page_mut(rid)
+    }
+    fn find_row(&self, column_index: usize, value: i64) -> Option<RID> {
+        match self.index.get_from_index(column_index, value) {
+            Some(vals) => Some(vals[0]),
+            None => {
+                let rid: RID = 0.into();
+
+                while rid.raw() < self.next_rid.raw() {
+                    let page = self.get_page_range(rid.page_range()).get_page(&rid);
+
+                    if page
+                        .unwrap()
+                        .get_column(NUM_METADATA_COLUMNS + column_index)
+                        .slot(rid.slot())
+                        == value
+                    {
+                        return Some(rid);
+                    }
+                }
+                None
+            }
+        }
     }
     fn find_rows(&self, column_index: usize, value: i64) -> Vec<RID> {
         match self.index.get_from_index(column_index, value) {
@@ -38,6 +65,7 @@ impl Table {
                     let page = self.get_page_range(rid.page_range()).get_page(&rid);
 
                     if page
+                        .unwrap()
                         .get_column(NUM_METADATA_COLUMNS + column_index)
                         .slot(rid.slot())
                         == value
@@ -59,11 +87,12 @@ impl Table {
                     let page = self.get_page_range(rid.page_range()).get_page(&rid);
 
                     let key = page
+                        .unwrap()
                         .get_column(NUM_METADATA_COLUMNS + self.primary_key_index)
                         .slot(rid.slot());
 
                     if key >= begin && key < end {
-                        rids.push(rid.clone());
+                        rids.push(rid);
                     }
 
                     rid = rid.next();
@@ -74,16 +103,28 @@ impl Table {
     }
     pub fn find_latest(&self, rid: &RID) -> RID {
         let page = self.get_page(rid);
-        match page.get_column(METADATA_SCHEMA_ENCODING).slot(rid.slot()) {
+        match page
+            .unwrap()
+            .get_column(METADATA_SCHEMA_ENCODING)
+            .slot(rid.slot())
+        {
             0 => *rid,
-            1 => RID::from(page.get_column(METADATA_INDIRECTION).slot(rid.slot())),
-            _ => panic!(),
+            _ => RID::from(
+                page.unwrap()
+                    .get_column(METADATA_INDIRECTION)
+                    .slot(rid.slot()),
+            ),
         }
     }
 }
 
 #[pymethods]
 impl Table {
+    #[getter]
+    fn num_columns(&self) -> usize {
+        self.num_columns
+    }
+
     #[new]
     pub fn new(name: String, num_columns: usize, key_index: usize) -> Table {
         Table {
@@ -100,7 +141,8 @@ impl Table {
             .iter()
             .map(|rid| {
                 self.get_page_range(rid.page_range())
-                    .get_page(&rid)
+                    .get_page(rid)
+                    .unwrap()
                     .get_column(NUM_METADATA_COLUMNS + column_index)
                     .slot(rid.slot())
             })
@@ -116,20 +158,40 @@ impl Table {
             .collect();
 
         let vals: Vec<RID> = self.find_rows(column_index, search_value);
+
         Python::with_gil(|py| {
             let selected_records: Py<PyList> = PyList::empty(py).into();
             let result_cols = PyList::empty(py);
             for rid in vals {
-                let page = self.get_page_range(rid.page_range()).get_page(&rid);
+                let rid = self.find_latest(&rid);
+
+                let page = if rid.is_base_page() {
+                    self.get_page_range(rid.page_range()).get_page(&rid)
+                } else {
+                    self.get_page_range(rid.tail_page_range()).get_page(&rid)
+                };
+
+                let slot = if rid.is_base_page() {
+                    rid.slot()
+                } else {
+                    rid.tail_page_slot()
+                };
+
                 for i in included_columns.iter() {
-                    result_cols.append(page.get_column(NUM_METADATA_COLUMNS + i).slot(rid.slot()));
+                    result_cols.append(
+                        page.unwrap()
+                            .get_column(NUM_METADATA_COLUMNS + i)
+                            .slot(rid.slot()),
+                    );
                 }
                 let record = PyCell::new(
                     py,
                     Record::new(
-                        page.get_column(METADATA_RID).slot(rid.slot()) as u64,
-                        page.get_column(METADATA_INDIRECTION).slot(rid.slot()) as u64,
-                        page.get_column(METADATA_SCHEMA_ENCODING).slot(rid.slot()) as u64,
+                        page.unwrap().get_column(METADATA_RID).slot(slot) as u64,
+                        page.unwrap().get_column(METADATA_INDIRECTION).slot(slot) as u64,
+                        page.unwrap()
+                            .get_column(METADATA_SCHEMA_ENCODING)
+                            .slot(slot) as u64,
                         result_cols.into(),
                     ),
                 )
@@ -146,26 +208,36 @@ impl Table {
             .iter()
             .map(|val| val.extract::<Option<i64>>().unwrap())
             .collect::<Vec<Option<i64>>>();
-        let vec = self.find_rows(self.primary_key_index, search_value);
-        if (vec.len() == 0) {
+
+        let row = self.find_row(self.primary_key_index, search_value);
+
+        if row.is_none() {
             return false;
-        } else if (vec.len() > 1) {
-            panic!();
         }
-        let spot = self.find_latest(&vec[0]);
-        let page = self.get_page(&spot);
-        let newvals: Vec<i64> = vals
-            .par_iter()
-            .zip(
-                (NUM_METADATA_COLUMNS..self.num_columns + NUM_METADATA_COLUMNS)
-                    .into_par_iter()
-                    .map(|column| page.get_column(column).slot(spot.slot())),
-            )
-            .map(|(updated, original)| match updated {
-                None => original,
-                Some(updated) => *updated,
-            })
-            .collect();
+
+        let row = row.unwrap();
+
+        let tail_rid = self
+            .get_page_range_mut(row.page_range())
+            .append_update_record(&row, &vals);
+
+        self.get_page_mut(&row)
+            .unwrap()
+            .get_column_mut(METADATA_INDIRECTION)
+            .write_slot(row.slot(), tail_rid.raw());
+
+        let mut schema_encoding: i64 = 0;
+
+        for (i, v) in vals.iter().enumerate() {
+            if !v.is_none() {
+                schema_encoding |= 1 << i;
+            }
+        }
+
+        self.get_page_mut(&row)
+            .unwrap()
+            .get_column_mut(METADATA_SCHEMA_ENCODING)
+            .write_slot(row.slot(), schema_encoding);
 
         true
     }
@@ -174,18 +246,19 @@ impl Table {
     pub fn insert(&mut self, values: &PyTuple) {
         let rid: RID = self.next_rid;
         let page_range = rid.page_range();
-        let page = rid.page();
         let slot = rid.slot();
 
         if self.ranges.len() <= page_range {
             self.ranges.push(PageRange::new(self.num_columns));
         }
 
-        let page_range = self.get_page_range(page_range);
-        let page = self.get_page_mut(&rid);
+        let page = self.get_page_mut(&rid).unwrap();
 
         page.get_column_mut(METADATA_RID)
-            .write_slot(slot, rid.raw() as i64);
+            .write_slot(slot, rid.raw());
+
+        page.get_column_mut(METADATA_SCHEMA_ENCODING)
+            .write_slot(slot, 0);
 
         for (i, val) in values.iter().enumerate() {
             page.get_column_mut(NUM_METADATA_COLUMNS + i)
