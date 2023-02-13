@@ -5,7 +5,6 @@ use pyo3::{
 };
 use std::{borrow::Borrow, cell::RefCell, mem::size_of};
 use std::{collections::BTreeMap, collections::HashMap};
-
 const PAGE_SIZE: usize = 4096;
 const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
 const PAGE_RANGE_SIZE: usize = PAGE_SIZE * 16;
@@ -17,110 +16,10 @@ const METADATA_RID: usize = 1;
 const METADATA_TIMESTAMP: usize = 2;
 const METADATA_SCHEMA_ENCODING: usize = 3;
 
-#[derive(Clone, Copy, Debug, Default)]
-struct RID {
-    rid: u64,
-}
-
-impl RID {
-    fn new(rid: u64) -> Self {
-        RID { rid }
-    }
-
-    fn next(&self) -> RID {
-        RID { rid: self.rid + 1 }
-    }
-
-    fn slot(&self) -> usize {
-        (self.rid & 0b111111111) as usize
-    }
-
-    fn page(&self) -> usize {
-        ((self.rid >> 9) & 0b1111) as usize
-    }
-
-    fn page_range(&self) -> usize {
-        (self.rid >> 13) as usize
-    }
-
-    fn raw(&self) -> u64 {
-        self.rid
-    }
-}
-
-impl From<u64> for RID {
-    fn from(value: u64) -> Self {
-        RID { rid: value }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-#[pyclass(subclass)]
-//change to BTreeMap when we need to implement ranges
-struct Index {
-    indices: Vec<Option<BTreeMap<i64, Vec<RID>>>>,
-}
-impl fmt::Display for Index {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (i, v) in self.indices.iter().enumerate() {
-            write!(f, "Index on Column {}:\n", i);
-            match v {
-                Some(v) => {
-                    for (key, value) in v.iter() {
-                        write!(f, "Key: {} | Value: {:?}\n", key, value)?;
-                    }
-                }
-                None => {
-                    write!(f, "None\n");
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-impl Index {
-    pub fn new(key_index: usize, num_columns: usize) -> Self {
-        let mut indices = Vec::with_capacity(num_columns);
-        indices.resize_with(num_columns, Default::default);
-        indices[key_index] = Some(BTreeMap::new());
-
-        Index { indices }
-    }
-
-    pub fn update_index(&mut self, column_number: usize, value: i64, rid: RID) {
-        if let Some(ref mut index) = self.indices[column_number] {
-            if let Some(ref mut rids) = index.get_mut(&value) {
-                rids.push(rid);
-            } else {
-                index.insert(value, vec![rid]);
-            }
-        }
-    }
-    pub fn get_from_index(&self, column_number: usize, value: i64) -> Option<Vec<RID>> {
-        self.indices[column_number]
-            .as_ref()
-            .map(|map| match map.get(&value) {
-                None => Vec::new(),
-                Some(rids) => rids.clone(),
-            })
-    }
-    pub fn range_from_index(&self, column_number: usize, begin: i64, end: i64) -> Option<Vec<RID>> {
-        self.indices[column_number].as_ref().map(|map| {
-            map.range(begin..end)
-                .flat_map(|item| item.1.clone())
-                .collect::<Vec<RID>>()
-        })
-    }
-    pub fn create_index(&mut self, column_number: usize) {
-        self.indices[column_number] = Some(BTreeMap::new());
-    }
-
-    pub fn drop_index(&mut self, column_number: usize) {
-        self.indices[column_number] = None;
-    }
-}
-
+pub mod index;
+pub mod rid;
+use crate::index::Index;
+use crate::rid::RID;
 #[derive(Clone, Debug)]
 #[pyclass(subclass, get_all)]
 struct Record {
