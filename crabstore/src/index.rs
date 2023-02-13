@@ -1,10 +1,9 @@
-
 use core::fmt;
-use std::collections::BTreeMap;
 use pyo3::{
     prelude::*,
     types::{PyList, PyTuple},
 };
+use std::collections::BTreeMap;
 
 use crate::rid::RID;
 
