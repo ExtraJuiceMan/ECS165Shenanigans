@@ -1,10 +1,10 @@
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RID {
-    rid: u64,
+    rid: i64,
 }
 
 impl RID {
-    pub fn new(rid: u64) -> Self {
+    pub fn new(rid: i64) -> Self {
         RID { rid }
     }
 
@@ -26,13 +26,13 @@ impl RID {
     pub fn is_base_page(&self) -> bool {
         (self.rid >> 63) == 0
     }
-    pub fn raw(&self) -> u64 {
+    pub fn raw(&self) -> i64 {
         self.rid
     }
 }
 
-impl From<u64> for RID {
-    fn from(value: u64) -> Self {
+impl From<i64> for RID {
+    fn from(value: i64) -> Self {
         RID { rid: value }
     }
 }

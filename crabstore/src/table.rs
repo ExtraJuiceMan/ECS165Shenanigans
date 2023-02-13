@@ -69,6 +69,15 @@ impl Table {
             }
         }
     }
+    pub fn find_latest(&self, rid: &RID) -> RID {
+        let page = self.get_page(rid);
+
+        match page.get_column(METADATA_SCHEMA_ENCODING).slot(rid.slot()) {
+            0 => *rid,
+            1 => RID::from(page.get_column(METADATA_INDIRECTION).slot(rid.slot())),
+            _ => panic!(),
+        }
+    }
 }
 
 #[pymethods]
@@ -84,7 +93,6 @@ impl Table {
             ranges: Vec::new(),
         }
     }
-
     pub fn sum(&self, start_range: i64, end_range: i64, column_index: usize) -> i64 {
         self.find_rows_range(self.primary_key_index, start_range, end_range)
             .iter()
@@ -144,6 +152,8 @@ impl Table {
         }
         let spot = vec[0];
         let page = self.get_page(&spot);
+        vals.iter()
+            .zip((NUM_METADATA_COLUMNS..self.num_columns + NUM_METADATA_COLUMNS));
         true
     }
 
