@@ -381,7 +381,7 @@ impl CrabStore {
 
 /// A Python module implemented in Rust.
 #[pymodule]
-fn store(_py: Python, m: &PyModule) -> PyResult<()> {
+fn crabstore(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Record>()?;
     m.add_class::<Table>()?;
     m.add_class::<CrabStore>()?;
