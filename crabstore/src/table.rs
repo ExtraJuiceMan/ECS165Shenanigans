@@ -71,7 +71,6 @@ impl Table {
     }
     pub fn find_latest(&self, rid: &RID) -> RID {
         let page = self.get_page(rid);
-
         match page.get_column(METADATA_SCHEMA_ENCODING).slot(rid.slot()) {
             0 => *rid,
             1 => RID::from(page.get_column(METADATA_INDIRECTION).slot(rid.slot())),
@@ -150,10 +149,19 @@ impl Table {
         } else if (vec.len() > 1) {
             panic!();
         }
-        let spot = vec[0];
+        let spot = self.find_latest(&vec[0]);
         let page = self.get_page(&spot);
-        vals.iter()
-            .zip((NUM_METADATA_COLUMNS..self.num_columns + NUM_METADATA_COLUMNS));
+        let newvals: Vec<i64> = vals
+            .iter()
+            .zip(
+                (NUM_METADATA_COLUMNS..self.num_columns + NUM_METADATA_COLUMNS)
+                    .map(|column| page.get_column(column).slot(spot.slot())),
+            )
+            .map(|(x, y)| match x {
+                None => y,
+                Some(x) => *x,
+            })
+            .collect();
         true
     }
 
