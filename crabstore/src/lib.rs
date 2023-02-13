@@ -108,21 +108,16 @@ impl Index {
             }),
         }
     }
-    pub fn range_from_index(
-        &self,
-        column_number: usize,
-        begin: i64,
-        end: i64,
-    ) -> Option<Vec<&RID>> {
+    pub fn range_from_index(&self, column_number: usize, begin: i64, end: i64) -> Option<Vec<RID>> {
         match &self.indices[column_number] {
             None => None,
             Some(map) => Some({
                 let rids: Vec<RID> = Vec::new();
                 let rids = map
                     .range(begin..end)
-                    .map(|item| item.1)
+                    .map(|item| item.1.clone())
                     .flatten()
-                    .collect::<Vec<&RID>>();
+                    .collect::<Vec<RID>>();
                 rids
             }),
         }
@@ -257,6 +252,29 @@ impl Table {
                     {
                         rids.push(rid.clone());
                     }
+                }
+                rids
+            }
+        }
+    }
+    fn find_rows_range(&self, column_index: usize, begin: i64, end: i64) -> Vec<RID> {
+        match self.index.range_from_index(column_index, begin, end) {
+            Some(vals) => vals,
+            None => {
+                let mut rids: Vec<RID> = Vec::new();
+                let mut rid: RID = 0.into();
+                while rid.raw() < self.next_rid.raw() {
+                    let page = self.get_page_range(rid.page_range()).get_page(rid.page());
+
+                    let key = page
+                        .get_column(NUM_METADATA_COLUMNS + self.primary_key_index)
+                        .slot(rid.slot());
+
+                    if key >= begin && key < end {
+                        rids.push(rid.clone());
+                    }
+
+                    rid = rid.next();
                 }
                 rids
             }
