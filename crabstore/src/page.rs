@@ -52,7 +52,7 @@ pub struct PageRange {
 impl PageRange {
     pub fn new(num_columns: usize) -> Self {
         let tail_pages: Vec<Page> = vec![Page::new(num_columns)];
-        let mut base_pages: Vec<Page> = Vec::new();
+        let mut base_pages: Vec<Page> = Vec::with_capacity(crate::RANGE_PAGE_COUNT);
 
         for _ in 0..crate::RANGE_PAGE_COUNT {
             base_pages.push(Page::new(num_columns));
