@@ -29,7 +29,7 @@ impl Table {
                 let rid: RID = 0.into();
                 let mut rids = Vec::new();
                 while rid.raw() < self.next_rid.raw() {
-                    let page = self.get_page_range(rid.page_range()).get_page(rid.page());
+                    let page = self.get_page_range(rid.page_range()).get_page(&rid);
 
                     if page
                         .get_column(NUM_METADATA_COLUMNS + column_index)
@@ -50,7 +50,7 @@ impl Table {
                 let mut rids: Vec<RID> = Vec::new();
                 let mut rid: RID = 0.into();
                 while rid.raw() < self.next_rid.raw() {
-                    let page = self.get_page_range(rid.page_range()).get_page(rid.page());
+                    let page = self.get_page_range(rid.page_range()).get_page(&rid);
 
                     let key = page
                         .get_column(NUM_METADATA_COLUMNS + self.primary_key_index)
@@ -87,7 +87,7 @@ impl Table {
             .iter()
             .map(|rid| {
                 self.get_page_range(rid.page_range())
-                    .get_page(rid.page())
+                    .get_page(&rid)
                     .get_column(NUM_METADATA_COLUMNS + column_index)
                     .slot(rid.slot())
             })
@@ -108,7 +108,7 @@ impl Table {
             let selected_records: Py<PyList> = PyList::empty(py).into();
             let result_cols = PyList::empty(py);
             for rid in vals {
-                let page = self.get_page_range(rid.page_range()).get_page(rid.page());
+                let page = self.get_page_range(rid.page_range()).get_page(&rid);
                 for i in included_columns.iter() {
                     result_cols.append(page.get_column(NUM_METADATA_COLUMNS + i).slot(rid.slot()));
                 }
@@ -141,7 +141,7 @@ impl Table {
         }
 
         let page_range = self.get_page_range(page_range);
-        let page = page_range.get_page(page);
+        let page = page_range.get_page(&rid);
 
         page.get_column(METADATA_RID)
             .write_slot(slot, rid.raw() as i64);

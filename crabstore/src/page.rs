@@ -1,5 +1,5 @@
+use crate::rid::RID;
 use std::{borrow::Borrow, cell::RefCell};
-
 #[derive(Debug)]
 pub struct PhysicalPage {
     page: RefCell<[i64; crate::PAGE_SLOTS]>,
@@ -64,7 +64,10 @@ impl PageRange {
         }
     }
 
-    pub fn get_page(&self, page_num: usize) -> &Page {
-        &self.base_pages[page_num]
+    pub fn get_page(&self, rid: &RID) -> &Page {
+        match rid.is_base_page() {
+            true => &self.base_pages[rid.page()],
+            false => &self.tail_pages[rid.page()],
+        }
     }
 }
