@@ -97,15 +97,13 @@ impl Index {
             }
         }
     }
-    pub fn get_from_index(&self, column_number: usize, value: i64) -> Option<Vec<RID>>{
-        match &self.indices[column_number]{
-            None => {
-                None
-            },
+    pub fn get_from_index(&self, column_number: usize, value: i64) -> Option<Vec<RID>> {
+        match &self.indices[column_number] {
+            None => None,
             Some(map) => Some({
-                match map.get(&value){
+                match map.get(&value) {
                     None => Vec::new(),
-                    Some(rids) => rids.clone() 
+                    Some(rids) => rids.clone(),
                 }
             }),
         }
@@ -224,15 +222,15 @@ impl Table {
     fn get_page_range(&self, range_number: usize) -> &PageRange {
         &self.ranges[range_number]
     }
-    fn find_rows(&self, column_index:usize, value:i64) -> Vec<RID>{
-        match self.index.get_from_index(column_index, value){
+    fn find_rows(&self, column_index: usize, value: i64) -> Vec<RID> {
+        match self.index.get_from_index(column_index, value) {
             Some(vals) => vals,
             None => {
-                let rid:RID  = 0.into();
+                let rid: RID = 0.into();
                 let mut rids = Vec::new();
                 while rid.raw() < self.next_rid.raw() {
                     let page = self.get_page_range(rid.page_range()).get_page(rid.page());
-        
+
                     if page
                         .get_column(NUM_METADATA_COLUMNS + column_index)
                         .slot(rid.slot())
@@ -242,7 +240,7 @@ impl Table {
                     }
                 }
                 rids
-            },
+            }
         }
     }
 }
@@ -293,10 +291,12 @@ impl Table {
             .filter(|(_i, x)| x.extract::<i64>().unwrap() != 0)
             .map(|(i, _x)| i)
             .collect();
-        let vals:Vec<RID> = self.find_rows(column_index, search_value);
+
+        let vals: Vec<RID> = self.find_rows(column_index, search_value);
+
         Python::with_gil(|py| {
             let result_cols = PyList::empty(py);
-            for rid in vals{
+            for rid in vals {
                 let page = self.get_page_range(rid.page_range()).get_page(rid.page());
                 for i in included_columns.iter() {
                     result_cols.append(page.get_column(NUM_METADATA_COLUMNS + i).slot(rid.slot()));
@@ -311,7 +311,7 @@ impl Table {
                     ),
                 )
                 .unwrap();
-    
+
                 selected_records.as_ref(py).append(record);
             }
         });
@@ -343,7 +343,11 @@ impl Table {
 
         self.index.update_index(
             self.primary_key_index,
-            values.get_item(self.primary_key_index).unwrap().extract().unwrap(),
+            values
+                .get_item(self.primary_key_index)
+                .unwrap()
+                .extract()
+                .unwrap(),
             rid,
         );
 
