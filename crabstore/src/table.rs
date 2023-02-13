@@ -95,8 +95,6 @@ impl Table {
     }
 
     pub fn select(&self, search_value: i64, column_index: usize, columns: &PyList) -> Py<PyList> {
-        let selected_records = Python::with_gil(|py| -> Py<PyList> { PyList::empty(py).into() });
-
         let included_columns: Vec<usize> = columns
             .iter()
             .enumerate()
@@ -107,6 +105,7 @@ impl Table {
         let vals: Vec<RID> = self.find_rows(column_index, search_value);
 
         Python::with_gil(|py| {
+            let selected_records: Py<PyList> = PyList::empty(py).into();
             let result_cols = PyList::empty(py);
             for rid in vals {
                 let page = self.get_page_range(rid.page_range()).get_page(rid.page());
@@ -126,9 +125,8 @@ impl Table {
 
                 selected_records.as_ref(py).append(record);
             }
-        });
-
-        selected_records
+            selected_records
+        })
     }
 
     #[args(values = "*")]
