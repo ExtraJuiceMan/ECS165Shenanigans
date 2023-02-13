@@ -8,7 +8,7 @@ pub struct RID {
 impl RID {
     pub fn new_tail(page_range: usize, id: usize) -> Self {
         RID {
-            rid: (page_range | (id << 32)) as i64,
+            rid: ((page_range | (id << 32)) | 1 << 63) as i64,
         }
     }
 
