@@ -1,4 +1,4 @@
-from store import CrabStore
+from crabstore import CrabStore
 
 class Database:
     def __init__(self):
