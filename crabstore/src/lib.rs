@@ -214,7 +214,7 @@ impl PageRange {
 struct Table {
     name: String,
     num_columns: usize,
-    key_index: usize,
+    primary_key_index: usize,
     index: Index,
     next_rid: RID,
     ranges: Vec<PageRange>,
@@ -254,12 +254,13 @@ impl Table {
         Table {
             name,
             num_columns,
-            key_index,
+            primary_key_index: key_index,
             index: Index::new(key_index, num_columns),
             next_rid: 0.into(),
             ranges: Vec::new(),
         }
     }
+
     pub fn sum(&self, start_range: i64, end_range: i64, column_index: usize) -> i64 {
         let mut rid: RID = 0.into();
         let mut sum: i64 = 0;
@@ -268,7 +269,7 @@ impl Table {
             let page = self.get_page_range(rid.page_range()).get_page(rid.page());
 
             let key = page
-                .get_column(NUM_METADATA_COLUMNS + self.key_index)
+                .get_column(NUM_METADATA_COLUMNS + self.primary_key_index)
                 .slot(rid.slot());
 
             if key >= start_range && key < end_range {
@@ -292,26 +293,14 @@ impl Table {
             .filter(|(_i, x)| x.extract::<i64>().unwrap() != 0)
             .map(|(i, _x)| i)
             .collect();
-        let mut rid: RID = 0.into();
         let vals:Vec<RID> = self.find_rows(column_index, search_value);
-        while rid.raw() < self.next_rid.raw() {
-            let page = self.get_page_range(rid.page_range()).get_page(rid.page());
-
-            if page
-                .get_column(NUM_METADATA_COLUMNS + column_index)
-                .slot(rid.slot())
-                != search_value
-            {
-                rid = rid.next();
-                continue;
-            }
-
-            Python::with_gil(|py| {
-                let result_cols = PyList::empty(py);
+        Python::with_gil(|py| {
+            let result_cols = PyList::empty(py);
+            for rid in vals{
+                let page = self.get_page_range(rid.page_range()).get_page(rid.page());
                 for i in included_columns.iter() {
                     result_cols.append(page.get_column(NUM_METADATA_COLUMNS + i).slot(rid.slot()));
                 }
-
                 let record = PyCell::new(
                     py,
                     Record::new(
@@ -322,12 +311,10 @@ impl Table {
                     ),
                 )
                 .unwrap();
-
+    
                 selected_records.as_ref(py).append(record);
-            });
-
-            rid = rid.next();
-        }
+            }
+        });
 
         selected_records
     }
@@ -355,8 +342,8 @@ impl Table {
         }
 
         self.index.update_index(
-            self.key_index,
-            values.get_item(self.key_index).unwrap().extract().unwrap(),
+            self.primary_key_index,
+            values.get_item(self.primary_key_index).unwrap().extract().unwrap(),
             rid,
         );
 
@@ -366,7 +353,7 @@ impl Table {
     pub fn print(&self) {
         println!("{}", self.name);
         println!("{}", self.num_columns);
-        println!("{}", self.key_index);
+        println!("{}", self.primary_key_index);
         println!("{}", self.index);
     }
 }
