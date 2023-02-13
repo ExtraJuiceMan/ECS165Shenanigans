@@ -2,24 +2,24 @@ use crate::rid::RID;
 use std::{borrow::Borrow, cell::RefCell};
 #[derive(Debug)]
 pub struct PhysicalPage {
-    page: RefCell<[i64; crate::PAGE_SLOTS]>,
+    page: [i64; crate::PAGE_SLOTS],
 }
 
 impl Default for PhysicalPage {
     fn default() -> Self {
         PhysicalPage {
-            page: RefCell::new([0; crate::PAGE_SLOTS]),
+            page: [0; crate::PAGE_SLOTS],
         }
     }
 }
 
 impl PhysicalPage {
     pub fn slot(&self, index: usize) -> i64 {
-        self.page.borrow()[index]
+        self.page[index]
     }
 
-    pub fn write_slot(&self, index: usize, value: i64) {
-        self.page.borrow_mut()[index] = value;
+    pub fn write_slot(&mut self, index: usize, value: i64) {
+        self.page[index] = value;
     }
 }
 
@@ -40,6 +40,9 @@ impl Page {
 
     pub fn get_column(&self, index: usize) -> &PhysicalPage {
         self.columns.as_ref()[index].borrow()
+    }
+    pub fn get_column_mut(&mut self, index: usize) -> &mut PhysicalPage {
+        &mut self.columns[index]
     }
 }
 
@@ -68,6 +71,12 @@ impl PageRange {
         match rid.is_base_page() {
             true => &self.base_pages[rid.page()],
             false => &self.tail_pages[rid.page()],
+        }
+    }
+    pub fn get_page_mut(&mut self, rid: &RID) -> &mut Page {
+        match rid.is_base_page() {
+            true => &mut self.base_pages[rid.page()],
+            false => &mut self.tail_pages[rid.page()],
         }
     }
 }

@@ -6,7 +6,7 @@ use crate::{
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
-
+use rayon::prelude::*;
 #[derive(Debug, Default)]
 #[pyclass(subclass)]
 pub struct Table {
@@ -24,6 +24,9 @@ impl Table {
     }
     fn get_page(&self, rid: &RID) -> &Page {
         self.get_page_range(rid.page_range()).get_page(&rid)
+    }
+    fn get_page_mut(&mut self, rid: &RID) -> &mut Page {
+        (&mut self.ranges[rid.page_range()]).get_page_mut(&rid)
     }
     fn find_rows(&self, column_index: usize, value: i64) -> Vec<RID> {
         match self.index.get_from_index(column_index, value) {
@@ -152,16 +155,18 @@ impl Table {
         let spot = self.find_latest(&vec[0]);
         let page = self.get_page(&spot);
         let newvals: Vec<i64> = vals
-            .iter()
+            .par_iter()
             .zip(
                 (NUM_METADATA_COLUMNS..self.num_columns + NUM_METADATA_COLUMNS)
+                    .into_par_iter()
                     .map(|column| page.get_column(column).slot(spot.slot())),
             )
-            .map(|(x, y)| match x {
-                None => y,
-                Some(x) => *x,
+            .map(|(updated, original)| match updated {
+                None => original,
+                Some(updated) => *updated,
             })
             .collect();
+
         true
     }
 
@@ -177,13 +182,13 @@ impl Table {
         }
 
         let page_range = self.get_page_range(page_range);
-        let page = page_range.get_page(&rid);
+        let page = self.get_page_mut(&rid);
 
-        page.get_column(METADATA_RID)
+        page.get_column_mut(METADATA_RID)
             .write_slot(slot, rid.raw() as i64);
 
         for (i, val) in values.iter().enumerate() {
-            page.get_column(NUM_METADATA_COLUMNS + i)
+            page.get_column_mut(NUM_METADATA_COLUMNS + i)
                 .write_slot(slot, val.extract().unwrap())
         }
 
