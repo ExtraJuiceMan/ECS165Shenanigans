@@ -1,5 +1,8 @@
-use crate::{rid::RID, PAGE_SLOTS};
-use std::{borrow::Borrow, cell::RefCell};
+use crate::{
+    rid::{self, RID},
+    METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS, PAGE_SLOTS,
+};
+use std::{borrow::Borrow, cell::RefCell, collections::btree_map::Values, fmt::Display};
 #[derive(Debug)]
 pub struct PhysicalPage {
     page: [i64; crate::PAGE_SLOTS],
@@ -30,9 +33,8 @@ pub struct Page {
 
 impl Page {
     pub fn new(num_columns: usize) -> Self {
-        let mut columns: Vec<PhysicalPage> =
-            Vec::with_capacity(crate::NUM_METADATA_COLUMNS + num_columns);
-        columns.resize_with(crate::NUM_METADATA_COLUMNS + num_columns, Default::default);
+        let mut columns: Vec<PhysicalPage> = Vec::with_capacity(NUM_METADATA_COLUMNS + num_columns);
+        columns.resize_with(NUM_METADATA_COLUMNS + num_columns, Default::default);
         let columns = columns.into_boxed_slice();
 
         Page { columns }
@@ -43,6 +45,12 @@ impl Page {
     }
     pub fn get_column_mut(&mut self, index: usize) -> &mut PhysicalPage {
         &mut self.columns[index]
+    }
+    pub fn get_slot(&self, column: usize, rid: &RID) -> i64 {
+        self.columns.as_ref()[column].borrow().slot(rid.slot())
+    }
+    pub fn write_slot(&mut self, column: usize, rid: &RID, value: i64) {
+        (&mut self.columns[column]).page[rid.slot()] = value;
     }
 }
 
@@ -70,7 +78,6 @@ impl PageRange {
             tail_pages,
         }
     }
-
     pub fn append_update_record(&mut self, base_rid: &RID, columns: &Vec<Option<i64>>) -> RID {
         if self.tail_id / PAGE_SLOTS < self.tail_pages.len() {
             self.allocate_new_page()
@@ -78,26 +85,14 @@ impl PageRange {
 
         let page = &mut self.tail_pages[self.tail_id / PAGE_SLOTS];
         let base_page = &mut self.base_pages[base_rid.page()];
-
-        let indirection_column_rid;
-
-        if base_page
-            .get_column(crate::METADATA_SCHEMA_ENCODING)
-            .slot(base_rid.slot())
-            == 0
-        {
-            indirection_column_rid = base_page
-                .get_column(crate::METADATA_RID)
-                .slot(base_rid.slot());
-        } else {
-            indirection_column_rid = base_page
-                .get_column(crate::METADATA_INDIRECTION)
-                .slot(base_rid.slot());
-        }
+        let indirection_column_rid = match base_page.get_slot(METADATA_SCHEMA_ENCODING, base_rid) {
+            0 => base_rid.raw(),
+            _ => base_page.get_slot(METADATA_INDIRECTION, base_rid),
+        };
 
         let slot = self.tail_id % PAGE_SLOTS;
 
-        page.get_column_mut(crate::METADATA_INDIRECTION)
+        page.get_column_mut(METADATA_INDIRECTION)
             .write_slot(slot, indirection_column_rid);
 
         let newrid = RID::new_tail(base_rid.page_range(), self.tail_id);
@@ -119,10 +114,14 @@ impl PageRange {
                         .write_slot(slot, *v);
                 }
             }
+            print!(
+                "{:?}\n",
+                base_page.get_column(crate::NUM_METADATA_COLUMNS + i),
+            );
+            print!("{:?}\n", page.get_column(crate::NUM_METADATA_COLUMNS + i))
         }
 
         self.tail_id += 1;
-
         newrid
     }
 

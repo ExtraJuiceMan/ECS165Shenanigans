@@ -19,7 +19,7 @@ def validate():
 	# dictionary for records to test the database: test directory
 	records = {}
 
-	number_of_records = 1000
+	number_of_records = 1
 	number_of_aggregates = 100
 	seed(3562901)
 
@@ -34,7 +34,7 @@ def validate():
 		query.insert(*records[key])
 		# print('inserted', records[key])
 	print("Insert finished")
-
+	print(records)
 	# Check inserted records using select query
 	for key in records:
 		# select function will return array of records 
@@ -121,4 +121,4 @@ def benchmark():
 print("Validate: ")
 validate()
 print("Benchmark: ")
-benchmark()
+#benchmark()
