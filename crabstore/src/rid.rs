@@ -23,7 +23,9 @@ impl RID {
     pub fn page_range(&self) -> usize {
         (self.rid >> 13) as usize
     }
-
+    pub fn is_base_page(&self) -> bool {
+        (self.rid >> 63) == 0
+    }
     pub fn raw(&self) -> u64 {
         self.rid
     }
