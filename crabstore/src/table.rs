@@ -39,7 +39,7 @@ impl Table {
                         .slot(rid.slot())
                         == value
                     {
-                        rids.push(rid.clone());
+                        rids.push(rid);
                     }
                 }
                 rids
