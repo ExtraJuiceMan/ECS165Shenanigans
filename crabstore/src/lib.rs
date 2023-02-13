@@ -58,7 +58,7 @@ impl From<u64> for RID {
 #[pyclass(subclass)]
 //change to BTreeMap when we need to implement ranges
 struct Index {
-    indices: Vec<Option<HashMap<i64, Vec<RID>>>>,
+    indices: Vec<Option<BTreeMap<i64, Vec<RID>>>>,
 }
 impl fmt::Display for Index {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -83,7 +83,7 @@ impl Index {
     pub fn new(key_index: usize, num_columns: usize) -> Self {
         let mut indices = Vec::with_capacity(num_columns);
         indices.resize_with(num_columns, Default::default);
-        indices[key_index] = Some(HashMap::new());
+        indices[key_index] = Some(BTreeMap::new());
 
         Index { indices }
     }
@@ -97,9 +97,21 @@ impl Index {
             }
         }
     }
-
+    pub fn get_from_index(&self, column_number: usize, value: i64) -> Option<Vec<RID>>{
+        match &self.indices[column_number]{
+            None => {
+                None
+            },
+            Some(map) => Some({
+                match map.get(&value){
+                    None => Vec::new(),
+                    Some(rids) => rids.clone() 
+                }
+            }),
+        }
+    }
     pub fn create_index(&mut self, column_number: usize) {
-        self.indices[column_number] = Some(HashMap::new());
+        self.indices[column_number] = Some(BTreeMap::new());
     }
 
     pub fn drop_index(&mut self, column_number: usize) {
@@ -202,7 +214,7 @@ impl PageRange {
 struct Table {
     name: String,
     num_columns: usize,
-    key_index: usize,
+    primary_key_index: usize,
     index: Index,
     next_rid: RID,
     ranges: Vec<PageRange>,
@@ -211,6 +223,27 @@ struct Table {
 impl Table {
     fn get_page_range(&self, range_number: usize) -> &PageRange {
         &self.ranges[range_number]
+    }
+    fn find_rows(&self, column_index:usize, value:i64) -> Vec<RID>{
+        match self.index.get_from_index(column_index, value){
+            Some(vals) => vals,
+            None => {
+                let rid:RID  = 0.into();
+                let mut rids = Vec::new();
+                while rid.raw() < self.next_rid.raw() {
+                    let page = self.get_page_range(rid.page_range()).get_page(rid.page());
+        
+                    if page
+                        .get_column(NUM_METADATA_COLUMNS + column_index)
+                        .slot(rid.slot())
+                        == value
+                    {
+                        rids.push(rid.clone());
+                    }
+                }
+                rids
+            },
+        }
     }
 }
 
@@ -221,7 +254,7 @@ impl Table {
         Table {
             name,
             num_columns,
-            key_index,
+            primary_key_index: key_index,
             index: Index::new(key_index, num_columns),
             next_rid: 0.into(),
             ranges: Vec::new(),
@@ -236,7 +269,7 @@ impl Table {
             let page = self.get_page_range(rid.page_range()).get_page(rid.page());
 
             let key = page
-                .get_column(NUM_METADATA_COLUMNS + self.key_index)
+                .get_column(NUM_METADATA_COLUMNS + self.primary_key_index)
                 .slot(rid.slot());
 
             if key >= start_range && key < end_range {
@@ -260,27 +293,14 @@ impl Table {
             .filter(|(_i, x)| x.extract::<i64>().unwrap() != 0)
             .map(|(i, _x)| i)
             .collect();
-
-        let mut rid: RID = 0.into();
-
-        while rid.raw() < self.next_rid.raw() {
-            let page = self.get_page_range(rid.page_range()).get_page(rid.page());
-
-            if page
-                .get_column(NUM_METADATA_COLUMNS + column_index)
-                .slot(rid.slot())
-                != search_value
-            {
-                rid = rid.next();
-                continue;
-            }
-
-            Python::with_gil(|py| {
-                let result_cols = PyList::empty(py);
+        let vals:Vec<RID> = self.find_rows(column_index, search_value);
+        Python::with_gil(|py| {
+            let result_cols = PyList::empty(py);
+            for rid in vals{
+                let page = self.get_page_range(rid.page_range()).get_page(rid.page());
                 for i in included_columns.iter() {
                     result_cols.append(page.get_column(NUM_METADATA_COLUMNS + i).slot(rid.slot()));
                 }
-
                 let record = PyCell::new(
                     py,
                     Record::new(
@@ -291,12 +311,10 @@ impl Table {
                     ),
                 )
                 .unwrap();
-
+    
                 selected_records.as_ref(py).append(record);
-            });
-
-            rid = rid.next();
-        }
+            }
+        });
 
         selected_records
     }
@@ -324,8 +342,8 @@ impl Table {
         }
 
         self.index.update_index(
-            self.key_index,
-            values.get_item(self.key_index).unwrap().extract().unwrap(),
+            self.primary_key_index,
+            values.get_item(self.primary_key_index).unwrap().extract().unwrap(),
             rid,
         );
 
@@ -335,7 +353,7 @@ impl Table {
     pub fn print(&self) {
         println!("{}", self.name);
         println!("{}", self.num_columns);
-        println!("{}", self.key_index);
+        println!("{}", self.primary_key_index);
         println!("{}", self.index);
     }
 }
