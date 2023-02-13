@@ -83,7 +83,7 @@ impl Table {
     }
 
     pub fn sum(&self, start_range: i64, end_range: i64, column_index: usize) -> i64 {
-        self.find_rows_range(column_index, start_range, end_range)
+        self.find_rows_range(self.primary_key_index, start_range, end_range)
             .iter()
             .map(|rid| {
                 self.get_page_range(rid.page_range())
