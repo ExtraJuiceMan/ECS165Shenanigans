@@ -3,8 +3,8 @@ use pyo3::{
     prelude::*,
     types::{PyList, PyTuple},
 };
-use std::{borrow::Borrow, cell::RefCell, mem::size_of, slice::SliceIndex};
-use std::{cell::Cell, collections::BTreeMap, collections::HashMap};
+use std::{borrow::Borrow, cell::RefCell, mem::size_of};
+use std::{collections::BTreeMap, collections::HashMap};
 
 const PAGE_SIZE: usize = 4096;
 const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
@@ -98,29 +98,19 @@ impl Index {
         }
     }
     pub fn get_from_index(&self, column_number: usize, value: i64) -> Option<Vec<RID>> {
-        match &self.indices[column_number] {
-            None => None,
-            Some(map) => Some({
-                match map.get(&value) {
-                    None => Vec::new(),
-                    Some(rids) => rids.clone(),
-                }
-            }),
-        }
+        self.indices[column_number]
+            .as_ref()
+            .map(|map| match map.get(&value) {
+                None => Vec::new(),
+                Some(rids) => rids.clone(),
+            })
     }
     pub fn range_from_index(&self, column_number: usize, begin: i64, end: i64) -> Option<Vec<RID>> {
-        match &self.indices[column_number] {
-            None => None,
-            Some(map) => Some({
-                let rids: Vec<RID> = Vec::new();
-                let rids = map
-                    .range(begin..end)
-                    .map(|item| item.1.clone())
-                    .flatten()
-                    .collect::<Vec<RID>>();
-                rids
-            }),
-        }
+        self.indices[column_number].as_ref().map(|map| {
+            map.range(begin..end)
+                .flat_map(|item| item.1.clone())
+                .collect::<Vec<RID>>()
+        })
     }
     pub fn create_index(&mut self, column_number: usize) {
         self.indices[column_number] = Some(BTreeMap::new());
