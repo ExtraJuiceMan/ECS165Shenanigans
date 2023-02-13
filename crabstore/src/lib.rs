@@ -110,6 +110,17 @@ impl Index {
             }),
         }
     }
+    pub fn range_from_index(&self, column_number: usize, begin:i64, end: i64) -> Option<Vec<&RID>>{
+        match &self.indices[column_number]{
+            None => None,
+            Some(map) =>Some({
+                let rids:Vec<RID> = Vec::new();
+                let rids = map.range(begin..end)
+                    .map(|item|item.1).flatten().collect::<Vec<&RID>>();
+                rids
+            })
+        }
+    }
     pub fn create_index(&mut self, column_number: usize) {
         self.indices[column_number] = Some(BTreeMap::new());
     }
