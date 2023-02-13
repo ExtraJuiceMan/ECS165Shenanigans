@@ -1,5 +1,5 @@
 use crate::index::Index;
-use crate::page::PageRange;
+use crate::page::{Page, PageRange};
 use crate::rid::RID;
 use crate::{
     Record, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS,
@@ -21,6 +21,9 @@ pub struct Table {
 impl Table {
     fn get_page_range(&self, range_number: usize) -> &PageRange {
         &self.ranges[range_number]
+    }
+    fn get_page(&self, rid: &RID) -> &Page {
+        self.get_page_range(rid.page_range()).get_page(&rid)
     }
     fn find_rows(&self, column_index: usize, value: i64) -> Vec<RID> {
         match self.index.get_from_index(column_index, value) {
@@ -103,7 +106,6 @@ impl Table {
             .collect();
 
         let vals: Vec<RID> = self.find_rows(column_index, search_value);
-
         Python::with_gil(|py| {
             let selected_records: Py<PyList> = PyList::empty(py).into();
             let result_cols = PyList::empty(py);
@@ -127,6 +129,22 @@ impl Table {
             }
             selected_records
         })
+    }
+
+    pub fn update(&mut self, search_value: i64, values: &PyTuple) -> bool {
+        let vals: Vec<Option<i64>> = values
+            .iter()
+            .map(|val| val.extract::<Option<i64>>().unwrap())
+            .collect::<Vec<Option<i64>>>();
+        let vec = self.find_rows(self.primary_key_index, search_value);
+        if (vec.len() == 0) {
+            return false;
+        } else if (vec.len() > 1) {
+            panic!();
+        }
+        let spot = vec[0];
+        let page = self.get_page(&spot);
+        true
     }
 
     #[args(values = "*")]
