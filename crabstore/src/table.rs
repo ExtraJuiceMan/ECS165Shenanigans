@@ -228,7 +228,7 @@ impl Table {
         }
 
         let row = row.unwrap();
-        print!("Update called\n");
+        //print!("Update called\n");
         let tail_rid = self
             .get_page_range_mut(row.page_range())
             .append_update_record(&row, &vals);

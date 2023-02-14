@@ -3,7 +3,11 @@ use crate::{
     METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS, PAGE_SLOTS,
 };
 use std::{
-    any::TypeId, borrow::Borrow, cell::RefCell, collections::btree_map::Values, fmt::Display,
+    any::TypeId,
+    borrow::{Borrow, BorrowMut},
+    cell::RefCell,
+    collections::btree_map::Values,
+    fmt::Display,
 };
 #[derive(Debug)]
 pub struct PhysicalPage {
@@ -80,6 +84,52 @@ impl PageRange {
             tail_pages,
         }
     }
+    pub fn is_latest(&self, rid: &BaseRID) -> bool {
+        self.get_base_page(rid)
+            .unwrap()
+            .get_column(METADATA_SCHEMA_ENCODING)
+            .slot(rid.slot())
+            == 0
+    }
+    pub fn find_latest(&self, rid: &BaseRID) -> TailRID {
+        TailRID::from(
+            self.base_pages[rid.page()]
+                .get_column(METADATA_INDIRECTION)
+                .slot(rid.slot()),
+        )
+    }
+    pub fn merge_values(&self, base_rid: &BaseRID, columns: &Vec<Option<i64>>) -> Vec<i64> {
+        match self.is_latest(&base_rid) {
+            true => self.merge_values_given_page(
+                base_rid,
+                self.get_base_page(&base_rid).unwrap(),
+                columns,
+            ),
+            false => {
+                let new_rid = self.find_latest(&base_rid);
+                let page = self.get_tail_page(&new_rid);
+                self.merge_values_given_page(&new_rid, page.unwrap(), columns)
+            }
+        }
+    }
+    pub fn merge_values_given_page(
+        &self,
+        rid: &impl RID,
+        page: &Page,
+        columns: &Vec<Option<i64>>,
+    ) -> Vec<i64> {
+        columns
+            .iter()
+            .zip(
+                (NUM_METADATA_COLUMNS..self.num_columns + NUM_METADATA_COLUMNS)
+                    .map(|column| page.get_column(column).slot(rid.slot())),
+            )
+            .map(|(x, y)| match x {
+                None => y,
+                Some(x) => *x,
+            })
+            .collect()
+    }
     pub fn append_update_record(
         &mut self,
         base_rid: &BaseRID,
@@ -88,14 +138,13 @@ impl PageRange {
         if self.tail_id / PAGE_SLOTS < self.tail_pages.len() {
             self.allocate_new_page()
         }
-
+        let values = self.merge_values(base_rid, columns);
         let page = &mut self.tail_pages[self.tail_id / PAGE_SLOTS];
         let base_page = &mut self.base_pages[base_rid.page()];
         let indirection_column_rid = match base_page.get_slot(METADATA_SCHEMA_ENCODING, base_rid) {
             0 => base_rid.raw(),
             _ => base_page.get_slot(METADATA_INDIRECTION, base_rid),
         };
-
         let slot = self.tail_id % PAGE_SLOTS;
 
         page.get_column_mut(METADATA_INDIRECTION)
@@ -105,31 +154,13 @@ impl PageRange {
 
         page.get_column_mut(crate::METADATA_RID)
             .write_slot(slot, newrid.raw());
-        print!("Update vals: {:?}\n", columns);
-        for (i, val) in columns.iter().enumerate() {
-            match val {
-                None => {
-                    let new_rid =
-                        TailRID::from(page.get_column(METADATA_INDIRECTION).slot(base_rid.slot()));
-                    let oldval = page
-                        .get_column(crate::NUM_METADATA_COLUMNS + i)
-                        .slot(new_rid.slot());
-                    page.get_column_mut(crate::NUM_METADATA_COLUMNS + i)
-                        .write_slot(slot, oldval)
-                }
-                Some(v) => {
-                    page.get_column_mut(crate::NUM_METADATA_COLUMNS + i)
-                        .write_slot(slot, *v);
-                }
-            }
-            print!(
-                "Base Page: {:?}\n",
-                &base_page.get_column(crate::NUM_METADATA_COLUMNS + i).page[0..50],
-            );
-            print!(
-                "Tail Page: {:?}\n",
-                &page.get_column(crate::NUM_METADATA_COLUMNS + i).page[0..50]
-            )
+        //print!("Update vals: {:?}\n", columns);
+        for (i, val) in values.iter().enumerate() {
+            page.get_column_mut(crate::NUM_METADATA_COLUMNS + i)
+                .write_slot(slot, *val);
+
+            //print!("Base Page: {:?}\n",&base_page.get_column(crate::NUM_METADATA_COLUMNS + i).page[0..50],);
+            //print!("Tail Page: {:?}\n",&page.get_column(crate::NUM_METADATA_COLUMNS + i).page[0..50]);
         }
 
         self.tail_id += 1;
