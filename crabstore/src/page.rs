@@ -105,7 +105,7 @@ impl PageRange {
 
         page.get_column_mut(crate::METADATA_RID)
             .write_slot(slot, newrid.raw());
-        print!("Update vals: {:?}", columns);
+        print!("Update vals: {:?}\n", columns);
         for (i, val) in columns.iter().enumerate() {
             match val {
                 None => {
