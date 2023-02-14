@@ -135,7 +135,6 @@ def benchmark():
 	agg_time_1 = process_time()
 	print("Aggregate 10k of 100 record batch took:\t", agg_time_1 - agg_time_0)
 	
-input()
 print("Validate: ")
 validate()
 print("Benchmark: ")
