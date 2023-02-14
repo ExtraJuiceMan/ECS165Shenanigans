@@ -169,38 +169,41 @@ impl Table {
         Python::with_gil(|py| {
             let selected_records: Py<PyList> = PyList::empty(py).into();
             let result_cols = PyList::empty(py);
+            let mut page: Option<&Page>;
             for rid in vals {
                 if self.is_latest(&rid) {
+                    page = self.get_base_page(&rid);
                     for i in included_columns.iter() {
                         result_cols.append(
-                            self.get_base_page(&rid)
-                                .unwrap()
+                            page.unwrap()
                                 .get_column(NUM_METADATA_COLUMNS + i)
                                 .slot(rid.slot()),
                         );
                     }
                 } else {
-                }
-                let rid: TailRID = self.find_latest(&rid);
+                    let rid: TailRID = self.find_latest(&rid);
 
-                let page = self.get_page_range(rid.page_range()).get_tail_page(&rid);
+                    page = self.get_page_range(rid.page_range()).get_tail_page(&rid);
 
-                let slot = rid.slot();
-                for i in included_columns.iter() {
-                    result_cols.append(
-                        page.unwrap()
-                            .get_column(NUM_METADATA_COLUMNS + i)
-                            .slot(rid.slot()),
-                    );
+                    let slot = rid.slot();
+                    for i in included_columns.iter() {
+                        result_cols.append(
+                            page.unwrap()
+                                .get_column(NUM_METADATA_COLUMNS + i)
+                                .slot(rid.slot()),
+                        );
+                    }
                 }
                 let record = PyCell::new(
                     py,
                     Record::new(
-                        page.unwrap().get_column(METADATA_RID).slot(slot) as u64,
-                        page.unwrap().get_column(METADATA_INDIRECTION).slot(slot) as u64,
+                        page.unwrap().get_column(METADATA_RID).slot(rid.slot()) as u64,
+                        page.unwrap()
+                            .get_column(METADATA_INDIRECTION)
+                            .slot(rid.slot()) as u64,
                         page.unwrap()
                             .get_column(METADATA_SCHEMA_ENCODING)
-                            .slot(slot) as u64,
+                            .slot(rid.slot()) as u64,
                         result_cols.into(),
                     ),
                 )
@@ -225,7 +228,7 @@ impl Table {
         }
 
         let row = row.unwrap();
-        print!("Update called");
+        print!("Update called\n");
         let tail_rid = self
             .get_page_range_mut(row.page_range())
             .append_update_record(&row, &vals);

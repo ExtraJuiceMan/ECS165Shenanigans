@@ -105,7 +105,7 @@ impl PageRange {
 
         page.get_column_mut(crate::METADATA_RID)
             .write_slot(slot, newrid.raw());
-        print!("{:#?}", columns);
+        print!("Update vals: {:?}", columns);
         for (i, val) in columns.iter().enumerate() {
             match val {
                 None => {
@@ -121,10 +121,13 @@ impl PageRange {
                 }
             }
             print!(
-                "{:?}\n",
-                base_page.get_column(crate::NUM_METADATA_COLUMNS + i),
+                "Base Page: {:?}\n",
+                &base_page.get_column(crate::NUM_METADATA_COLUMNS + i).page[0..50],
             );
-            print!("{:?}\n", page.get_column(crate::NUM_METADATA_COLUMNS + i))
+            print!(
+                "Tail Page: {:?}\n",
+                &page.get_column(crate::NUM_METADATA_COLUMNS + i).page[0..50]
+            )
         }
 
         self.tail_id += 1;
