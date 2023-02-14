@@ -1,60 +1,77 @@
 use crate::PAGE_SLOTS;
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct RID {
+pub struct BaseRID {
+    rid: i64,
+}
+pub struct TailRID {
     rid: i64,
 }
 
-impl RID {
-    pub fn new_tail(page_range: usize, id: usize) -> Self {
-        RID {
-            rid: ((page_range | (id << 32)) | 1 << 63) as i64,
-        }
-    }
-
-    pub fn new(rid: i64) -> Self {
-        RID { rid }
-    }
-
-    pub fn next(&self) -> Self {
-        RID { rid: self.rid + 1 }
-    }
-
-    pub fn slot(&self) -> usize {
+pub trait RID {
+    fn slot(&self) -> usize;
+    fn page_range(&self) -> usize;
+    fn raw(&self) -> i64;
+    fn page(&self) -> usize;
+}
+impl RID for BaseRID {
+    fn slot(&self) -> usize {
         (self.rid & 0b111111111) as usize
     }
-
-    pub fn page(&self) -> usize {
-        ((self.rid >> 9) & 0b1111) as usize
-    }
-
-    pub fn page_range(&self) -> usize {
+    fn page_range(&self) -> usize {
         (self.rid >> 13) as usize
     }
-
-    pub fn is_base_page(&self) -> bool {
-        (self.rid >> 63) == 0
+    fn raw(&self) -> i64 {
+        self.rid
     }
-
-    pub fn tail_page_range(&self) -> usize {
+    fn page(&self) -> usize {
+        ((self.rid >> 9) & 0b1111) as usize
+    }
+}
+impl BaseRID {
+    pub fn new(rid: i64) -> Self {
+        BaseRID { rid }
+    }
+    pub fn next(&self) -> Self {
+        BaseRID { rid: self.rid + 1 }
+    }
+}
+impl From<i64> for BaseRID {
+    fn from(value: i64) -> Self {
+        BaseRID { rid: value }
+    }
+}
+impl RID for TailRID {
+    fn page_range(&self) -> usize {
         (self.rid & 0b11111111111111111111111111111111) as usize
     }
 
-    pub fn tail_page_id(&self) -> usize {
-        ((self.rid >> 32) & 0b1111111111111111111111111111111) as usize
+    fn slot(&self) -> usize {
+        self.id() % PAGE_SLOTS
     }
 
-    pub fn tail_page_slot(&self) -> usize {
-        self.tail_page_id() % PAGE_SLOTS
-    }
-
-    pub fn raw(&self) -> i64 {
+    fn raw(&self) -> i64 {
         self.rid
     }
+    fn page(&self) -> usize {
+        self.id() / PAGE_SLOTS
+    }
 }
-
-impl From<i64> for RID {
+impl TailRID {
+    pub fn new(rid: i64) -> Self {
+        TailRID { rid }
+    }
+    pub fn new_tail(page_range: usize, id: usize) -> Self {
+        TailRID {
+            rid: ((page_range | (id << 32)) | 1 << 63) as i64,
+        }
+    }
+    pub fn id(&self) -> usize {
+        ((self.rid >> 32) & 0b1111111111111111111111111111111) as usize
+    }
+}
+impl From<i64> for TailRID {
     fn from(value: i64) -> Self {
-        RID { rid: value }
+        TailRID { rid: value }
     }
 }

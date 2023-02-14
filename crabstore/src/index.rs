@@ -1,16 +1,14 @@
 use core::fmt;
-use pyo3::{
-    prelude::*,
-};
+use pyo3::prelude::*;
 use std::collections::BTreeMap;
 
-use crate::rid::RID;
+use crate::rid::{BaseRID, RID};
 
 #[derive(Clone, Debug, Default)]
 #[pyclass(subclass)]
 //change to BTreeMap when we need to implement ranges
 pub struct Index {
-    indices: Vec<Option<BTreeMap<i64, Vec<RID>>>>,
+    indices: Vec<Option<BTreeMap<i64, Vec<BaseRID>>>>,
 }
 impl fmt::Display for Index {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -40,7 +38,7 @@ impl Index {
         Index { indices }
     }
 
-    pub fn update_index(&mut self, column_number: usize, value: i64, rid: RID) {
+    pub fn update_index(&mut self, column_number: usize, value: i64, rid: BaseRID) {
         if let Some(ref mut index) = self.indices[column_number] {
             if let Some(ref mut rids) = index.get_mut(&value) {
                 rids.push(rid);
@@ -49,7 +47,7 @@ impl Index {
             }
         }
     }
-    pub fn get_from_index(&self, column_number: usize, value: i64) -> Option<Vec<RID>> {
+    pub fn get_from_index(&self, column_number: usize, value: i64) -> Option<Vec<BaseRID>> {
         self.indices[column_number]
             .as_ref()
             .map(|map| match map.get(&value) {
@@ -57,11 +55,16 @@ impl Index {
                 Some(rids) => rids.clone(),
             })
     }
-    pub fn range_from_index(&self, column_number: usize, begin: i64, end: i64) -> Option<Vec<RID>> {
+    pub fn range_from_index(
+        &self,
+        column_number: usize,
+        begin: i64,
+        end: i64,
+    ) -> Option<Vec<BaseRID>> {
         self.indices[column_number].as_ref().map(|map| {
             map.range(begin..end)
                 .flat_map(|item| item.1.clone())
-                .collect::<Vec<RID>>()
+                .collect::<Vec<BaseRID>>()
         })
     }
     pub fn create_index(&mut self, column_number: usize) {

@@ -1,8 +1,10 @@
 use crate::{
-    rid::{self, RID},
+    rid::{self, BaseRID, TailRID, RID},
     METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS, PAGE_SLOTS,
 };
-use std::{borrow::Borrow, cell::RefCell, collections::btree_map::Values, fmt::Display};
+use std::{
+    any::TypeId, borrow::Borrow, cell::RefCell, collections::btree_map::Values, fmt::Display,
+};
 #[derive(Debug)]
 pub struct PhysicalPage {
     page: [i64; crate::PAGE_SLOTS],
@@ -46,10 +48,10 @@ impl Page {
     pub fn get_column_mut(&mut self, index: usize) -> &mut PhysicalPage {
         &mut self.columns[index]
     }
-    pub fn get_slot(&self, column: usize, rid: &RID) -> i64 {
+    pub fn get_slot(&self, column: usize, rid: &impl RID) -> i64 {
         self.columns.as_ref()[column].borrow().slot(rid.slot())
     }
-    pub fn write_slot(&mut self, column: usize, rid: &RID, value: i64) {
+    pub fn write_slot(&mut self, column: usize, rid: &impl RID, value: i64) {
         (&mut self.columns[column]).page[rid.slot()] = value;
     }
 }
@@ -78,7 +80,11 @@ impl PageRange {
             tail_pages,
         }
     }
-    pub fn append_update_record(&mut self, base_rid: &RID, columns: &Vec<Option<i64>>) -> RID {
+    pub fn append_update_record(
+        &mut self,
+        base_rid: &BaseRID,
+        columns: &Vec<Option<i64>>,
+    ) -> TailRID {
         if self.tail_id / PAGE_SLOTS < self.tail_pages.len() {
             self.allocate_new_page()
         }
@@ -95,11 +101,11 @@ impl PageRange {
         page.get_column_mut(METADATA_INDIRECTION)
             .write_slot(slot, indirection_column_rid);
 
-        let newrid = RID::new_tail(base_rid.page_range(), self.tail_id);
+        let newrid = TailRID::new_tail(base_rid.page_range(), self.tail_id);
 
         page.get_column_mut(crate::METADATA_RID)
             .write_slot(slot, newrid.raw());
-
+        print!("{:#?}", columns);
         for (i, val) in columns.iter().enumerate() {
             match val {
                 None => {
@@ -125,36 +131,31 @@ impl PageRange {
         newrid
     }
 
-    pub fn page_exists(&self, rid: &RID) -> bool {
-        return rid.tail_page_id() / PAGE_SLOTS < self.tail_pages.len();
+    pub fn page_exists(&self, rid: &TailRID) -> bool {
+        return rid.id() / PAGE_SLOTS < self.tail_pages.len();
     }
 
     pub fn allocate_new_page(&mut self) {
         self.tail_pages.push(Page::new(self.num_columns))
     }
-
-    pub fn get_page(&self, rid: &RID) -> Option<&Page> {
-        match rid.is_base_page() {
-            true => Some(&self.base_pages[rid.page()]),
-            false => {
-                if !self.page_exists(rid) {
-                    None
-                } else {
-                    Some(&self.tail_pages[rid.tail_page_id() / PAGE_SLOTS])
-                }
-            }
+    pub fn get_base_page(&self, rid: &BaseRID) -> Option<&Page> {
+        Some(&self.base_pages[rid.page()])
+    }
+    pub fn get_tail_page(&self, rid: &TailRID) -> Option<&Page> {
+        if !self.page_exists(rid) {
+            None
+        } else {
+            Some(&self.tail_pages[rid.page()])
         }
     }
-    pub fn get_page_mut(&mut self, rid: &RID) -> Option<&mut Page> {
-        match rid.is_base_page() {
-            true => Some(&mut self.base_pages[rid.page()]),
-            false => {
-                if !self.page_exists(rid) {
-                    None
-                } else {
-                    Some(&mut self.tail_pages[rid.tail_page_id() / PAGE_SLOTS])
-                }
-            }
+    pub fn get_base_page_mut(&mut self, rid: &BaseRID) -> Option<&mut Page> {
+        Some(&mut self.base_pages[rid.page()])
+    }
+    pub fn get_tail_page_mut(&mut self, rid: &TailRID) -> Option<&mut Page> {
+        if !self.page_exists(rid) {
+            None
+        } else {
+            Some(&mut self.tail_pages[rid.page()])
         }
     }
 }

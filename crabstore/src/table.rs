@@ -1,6 +1,6 @@
 use crate::index::Index;
 use crate::page::{Page, PageRange};
-use crate::rid::RID;
+use crate::rid::{BaseRID, TailRID, RID};
 use crate::{
     Record, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS,
 };
@@ -15,7 +15,7 @@ pub struct Table {
     num_columns: usize,
     primary_key_index: usize,
     index: Index,
-    next_rid: RID,
+    next_rid: BaseRID,
     ranges: Vec<PageRange>,
 }
 
@@ -27,20 +27,26 @@ impl Table {
     fn get_page_range_mut(&mut self, range_number: usize) -> &mut PageRange {
         &mut self.ranges[range_number]
     }
-    fn get_page(&self, rid: &RID) -> Option<&Page> {
-        self.get_page_range(rid.page_range()).get_page(rid)
+    fn get_base_page(&self, rid: &BaseRID) -> Option<&Page> {
+        self.ranges[rid.page_range()].get_base_page(rid)
     }
-    fn get_page_mut(&mut self, rid: &RID) -> Option<&mut Page> {
-        self.ranges[rid.page_range()].get_page_mut(rid)
+    fn get_base_page_mut(&mut self, rid: &BaseRID) -> Option<&mut Page> {
+        self.ranges[rid.page_range()].get_base_page_mut(rid)
     }
-    fn find_row(&self, column_index: usize, value: i64) -> Option<RID> {
+    fn get_tail_page(&self, rid: &TailRID) -> Option<&Page> {
+        self.ranges[rid.page_range()].get_tail_page(rid)
+    }
+    fn get_tail_page_mut(&mut self, rid: &TailRID) -> Option<&mut Page> {
+        self.ranges[rid.page_range()].get_tail_page_mut(rid)
+    }
+    fn find_row(&self, column_index: usize, value: i64) -> Option<BaseRID> {
         match self.index.get_from_index(column_index, value) {
             Some(vals) => Some(vals[0]),
             None => {
-                let rid: RID = 0.into();
+                let rid: BaseRID = 0.into();
 
                 while rid.raw() < self.next_rid.raw() {
-                    let page = self.get_page_range(rid.page_range()).get_page(&rid);
+                    let page = self.get_page_range(rid.page_range()).get_base_page(&rid);
 
                     if page
                         .unwrap()
@@ -55,14 +61,14 @@ impl Table {
             }
         }
     }
-    fn find_rows(&self, column_index: usize, value: i64) -> Vec<RID> {
+    fn find_rows(&self, column_index: usize, value: i64) -> Vec<BaseRID> {
         match self.index.get_from_index(column_index, value) {
             Some(vals) => vals,
             None => {
-                let rid: RID = 0.into();
+                let rid: BaseRID = 0.into();
                 let mut rids = Vec::new();
                 while rid.raw() < self.next_rid.raw() {
-                    let page = self.get_page_range(rid.page_range()).get_page(&rid);
+                    let page = self.get_page_range(rid.page_range()).get_base_page(&rid);
 
                     if page
                         .unwrap()
@@ -77,14 +83,14 @@ impl Table {
             }
         }
     }
-    fn find_rows_range(&self, column_index: usize, begin: i64, end: i64) -> Vec<RID> {
+    fn find_rows_range(&self, column_index: usize, begin: i64, end: i64) -> Vec<BaseRID> {
         match self.index.range_from_index(column_index, begin, end) {
             Some(vals) => vals,
             None => {
-                let mut rids: Vec<RID> = Vec::new();
-                let mut rid: RID = 0.into();
+                let mut rids: Vec<BaseRID> = Vec::new();
+                let mut rid: BaseRID = 0.into();
                 while rid.raw() < self.next_rid.raw() {
-                    let page = self.get_page_range(rid.page_range()).get_page(&rid);
+                    let page = self.get_page_range(rid.page_range()).get_base_page(&rid);
 
                     let key = page
                         .unwrap()
@@ -101,20 +107,21 @@ impl Table {
             }
         }
     }
-    pub fn find_latest(&self, rid: &RID) -> RID {
-        let page = self.get_page(rid);
-        match page
+    pub fn is_latest(&self, rid: &BaseRID) -> bool {
+        self.get_base_page(rid)
             .unwrap()
             .get_column(METADATA_SCHEMA_ENCODING)
             .slot(rid.slot())
-        {
-            0 => *rid,
-            _ => RID::from(
-                page.unwrap()
-                    .get_column(METADATA_INDIRECTION)
-                    .slot(rid.slot()),
-            ),
-        }
+            == 0
+    }
+    pub fn find_latest(&self, rid: &BaseRID) -> TailRID {
+        let page = self.get_base_page(rid);
+
+        TailRID::from(
+            page.unwrap()
+                .get_column(METADATA_INDIRECTION)
+                .slot(rid.slot()),
+        )
     }
 }
 
@@ -141,7 +148,7 @@ impl Table {
             .iter()
             .map(|rid| {
                 self.get_page_range(rid.page_range())
-                    .get_page(rid)
+                    .get_base_page(rid)
                     .unwrap()
                     .get_column(NUM_METADATA_COLUMNS + column_index)
                     .slot(rid.slot())
@@ -157,26 +164,28 @@ impl Table {
             .map(|(i, _x)| i)
             .collect();
 
-        let vals: Vec<RID> = self.find_rows(column_index, search_value);
+        let vals: Vec<BaseRID> = self.find_rows(column_index, search_value);
 
         Python::with_gil(|py| {
             let selected_records: Py<PyList> = PyList::empty(py).into();
             let result_cols = PyList::empty(py);
             for rid in vals {
-                let rid = self.find_latest(&rid);
-
-                let page = if rid.is_base_page() {
-                    self.get_page_range(rid.page_range()).get_page(&rid)
+                if self.is_latest(&rid) {
+                    for i in included_columns.iter() {
+                        result_cols.append(
+                            self.get_base_page(&rid)
+                                .unwrap()
+                                .get_column(NUM_METADATA_COLUMNS + i)
+                                .slot(rid.slot()),
+                        );
+                    }
                 } else {
-                    self.get_page_range(rid.tail_page_range()).get_page(&rid)
-                };
+                }
+                let rid: TailRID = self.find_latest(&rid);
 
-                let slot = if rid.is_base_page() {
-                    rid.slot()
-                } else {
-                    rid.tail_page_slot()
-                };
+                let page = self.get_page_range(rid.page_range()).get_tail_page(&rid);
 
+                let slot = rid.slot();
                 for i in included_columns.iter() {
                     result_cols.append(
                         page.unwrap()
@@ -221,7 +230,7 @@ impl Table {
             .get_page_range_mut(row.page_range())
             .append_update_record(&row, &vals);
 
-        self.get_page_mut(&row)
+        self.get_base_page_mut(&row)
             .unwrap()
             .get_column_mut(METADATA_INDIRECTION)
             .write_slot(row.slot(), tail_rid.raw());
@@ -234,7 +243,7 @@ impl Table {
             }
         }
 
-        self.get_page_mut(&row)
+        self.get_base_page_mut(&row)
             .unwrap()
             .get_column_mut(METADATA_SCHEMA_ENCODING)
             .write_slot(row.slot(), schema_encoding);
@@ -244,7 +253,7 @@ impl Table {
 
     #[args(values = "*")]
     pub fn insert(&mut self, values: &PyTuple) {
-        let rid: RID = self.next_rid;
+        let rid: BaseRID = self.next_rid;
         let page_range = rid.page_range();
         let slot = rid.slot();
 
@@ -252,7 +261,7 @@ impl Table {
             self.ranges.push(PageRange::new(self.num_columns));
         }
 
-        let page = self.get_page_mut(&rid).unwrap();
+        let page = self.get_base_page_mut(&rid).unwrap();
 
         page.get_column_mut(METADATA_RID)
             .write_slot(slot, rid.raw());
