@@ -70,11 +70,12 @@ pub struct PageRange {
 
 impl PageRange {
     pub fn new(num_columns: usize) -> Self {
-        let tail_pages: Vec<Page> = vec![Page::new(num_columns)];
+        let mut tail_pages: Vec<Page> = Vec::with_capacity(crate::RANGE_PAGE_COUNT);
         let mut base_pages: Vec<Page> = Vec::with_capacity(crate::RANGE_PAGE_COUNT);
 
         for _ in 0..crate::RANGE_PAGE_COUNT {
             base_pages.push(Page::new(num_columns));
+            tail_pages.push(Page::new(num_columns));
         }
 
         PageRange {
@@ -135,8 +136,8 @@ impl PageRange {
         base_rid: &BaseRID,
         columns: &Vec<Option<i64>>,
     ) -> TailRID {
-        if self.tail_id / PAGE_SLOTS < self.tail_pages.len() {
-            self.allocate_new_page()
+        if self.tail_id / PAGE_SLOTS == self.tail_pages.len() {
+            self.allocate_new_page_set()
         }
         let values = self.merge_values(base_rid, columns);
         let page = &mut self.tail_pages[self.tail_id / PAGE_SLOTS];
@@ -171,8 +172,10 @@ impl PageRange {
         return rid.id() / PAGE_SLOTS < self.tail_pages.len();
     }
 
-    pub fn allocate_new_page(&mut self) {
-        self.tail_pages.push(Page::new(self.num_columns))
+    pub fn allocate_new_page_set(&mut self) {
+        for _ in 0..crate::RANGE_PAGE_COUNT {
+            self.tail_pages.push(Page::new(self.num_columns));
+        }
     }
     pub fn get_base_page(&self, rid: &BaseRID) -> Option<&Page> {
         Some(&self.base_pages[rid.page()])
