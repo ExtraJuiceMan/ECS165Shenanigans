@@ -109,9 +109,11 @@ impl PageRange {
         for (i, val) in columns.iter().enumerate() {
             match val {
                 None => {
-                    let oldval = base_page
+                    let new_rid =
+                        TailRID::from(page.get_column(METADATA_INDIRECTION).slot(base_rid.slot()));
+                    let oldval = page
                         .get_column(crate::NUM_METADATA_COLUMNS + i)
-                        .slot(base_rid.slot());
+                        .slot(new_rid.slot());
                     page.get_column_mut(crate::NUM_METADATA_COLUMNS + i)
                         .write_slot(slot, oldval)
                 }
