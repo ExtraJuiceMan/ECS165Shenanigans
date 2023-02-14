@@ -123,6 +123,15 @@ impl Table {
                 .slot(rid.slot()),
         )
     }
+    pub fn get_latest_page_rid(&self, rid: &BaseRID) -> (&Page, Box<dyn RID>) {
+        match self.is_latest(rid) {
+            true => (self.get_base_page(rid).unwrap(), Box::new(*rid)),
+            false => {
+                let newrid = Box::new(self.find_latest(rid));
+                (self.get_tail_page(&newrid).unwrap(), newrid)
+            }
+        }
+    }
 }
 
 #[pymethods]
@@ -144,16 +153,17 @@ impl Table {
         }
     }
     pub fn sum(&self, start_range: i64, end_range: i64, column_index: usize) -> i64 {
-        self.find_rows_range(self.primary_key_index, start_range, end_range)
+        let vec: Vec<i64> = self
+            .find_rows_range(column_index, start_range, end_range)
             .iter()
             .map(|rid| {
-                self.get_page_range(rid.page_range())
-                    .get_base_page(rid)
-                    .unwrap()
-                    .get_column(NUM_METADATA_COLUMNS + column_index)
-                    .slot(rid.slot())
+                let (page, newrid) = self.get_latest_page_rid(rid);
+                page.get_column(NUM_METADATA_COLUMNS + column_index)
+                    .slot(newrid.slot())
             })
-            .sum()
+            .collect::<Vec<i64>>();
+        print!("\n{:?}", vec);
+        vec.iter().sum()
     }
 
     pub fn select(&self, search_value: i64, column_index: usize, columns: &PyList) -> Py<PyList> {
