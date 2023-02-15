@@ -65,7 +65,7 @@ impl Table {
         match self.index.get_from_index(column_index, value) {
             Some(vals) => vals,
             None => {
-                let rid: BaseRID = 0.into();
+                let mut rid: BaseRID = 0.into();
                 let mut rids = Vec::new();
                 while rid.raw() < self.next_rid.raw() {
                     let page = self.get_page_range(rid.page_range()).get_base_page(&rid);
@@ -78,6 +78,7 @@ impl Table {
                     {
                         rids.push(rid);
                     }
+                    rid = rid.next();
                 }
                 rids
             }

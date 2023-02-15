@@ -72,6 +72,17 @@ def validate():
 					error = True
 			if error:
 				print('update error on', original, 'and', updated_columns, ':', record, ', correct:', records[key])
+			for update_column in range(1, grades_table.num_columns):
+				record = query.select(key, update_column, [1, 1, 1, 1, 1])
+				if(len(record) == 0):
+					error = True
+				else:
+					record = record[0] 
+					for j, column in enumerate(record.columns):
+						if column != records[key][j]:
+							error = True
+			if error:
+				print('select error on non-primary key', original, 'and', updated_columns, ':', record, ', correct:', records[key])
 			else:
 				pass
 				# print('update on', original, 'and', updated_columns, ':', record)
