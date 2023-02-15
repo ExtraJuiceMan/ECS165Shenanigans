@@ -97,7 +97,7 @@ impl Table {
                         .get_column(NUM_METADATA_COLUMNS + self.primary_key_index)
                         .slot(rid.slot());
 
-                    if key >= begin && key < end {
+                    if key >= begin && key <= end {
                         rids.push(rid);
                     }
 
@@ -162,7 +162,6 @@ impl Table {
                     .slot(newrid.slot())
             })
             .collect::<Vec<i64>>();
-        print!("\n{:?}", vec);
         vec.iter().sum()
     }
 

@@ -1,8 +1,11 @@
+use crate::rid::{BaseRID, RID};
 use core::fmt;
 use pyo3::prelude::*;
-use std::collections::BTreeMap;
-
-use crate::rid::{BaseRID, RID};
+use std::ops::Bound::Included;
+use std::{
+    collections::BTreeMap,
+    ops::{Bound, RangeInclusive},
+};
 
 #[derive(Clone, Debug, Default)]
 #[pyclass(subclass)]
@@ -62,7 +65,7 @@ impl Index {
         end: i64,
     ) -> Option<Vec<BaseRID>> {
         self.indices[column_number].as_ref().map(|map| {
-            map.range(begin..end)
+            map.range((Included(begin), Included(end)))
                 .flat_map(|item| item.1.clone())
                 .collect::<Vec<BaseRID>>()
         })
