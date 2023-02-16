@@ -15,6 +15,8 @@ const METADATA_INDIRECTION: usize = 0;
 const METADATA_RID: usize = 1;
 const METADATA_TIMESTAMP: usize = 2;
 const METADATA_SCHEMA_ENCODING: usize = 3;
+// 0xFF...FF
+const RID_INVALID: i64 = !0;
 
 pub mod index;
 pub mod page;

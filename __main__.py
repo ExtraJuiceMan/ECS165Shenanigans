@@ -72,17 +72,15 @@ def validate():
 					error = True
 			if error:
 				print('update error on', original, 'and', updated_columns, ':', record, ', correct:', records[key])
+
 			for update_column in range(1, grades_table.num_columns):
-				record = query.select(key, update_column, [1, 1, 1, 1, 1])
+				record = query.select(records[key][update_column], update_column, [1, 1, 1, 1, 1])
 				if(len(record) == 0):
 					error = True
 				else:
-					record = record[0] 
-					for j, column in enumerate(record.columns):
-						if column != records[key][j]:
-							error = True
+					error = len([x for x in record if x.columns[0] == key]) == 0
 			if error:
-				print('select error on non-primary key', original, 'and', updated_columns, ':', record, ', correct:', records[key])
+				print('select error on non-primary key', update_column, 'and', updated_columns, ':', record, ', correct:', records[key])
 			else:
 				pass
 				# print('update on', original, 'and', updated_columns, ':', record)
@@ -90,6 +88,7 @@ def validate():
 	print("Update finished.")
 	keys = sorted(list(records.keys()))
 	# aggregate on every column 
+
 	for c in range(0, grades_table.num_columns):
 		for i in range(0, number_of_aggregates):
 			r = sorted(sample(range(0, len(keys)), 2))
@@ -102,7 +101,17 @@ def validate():
 			else:
 				pass
 				# print('sum on [', keys[r[0]], ',', keys[r[1]], ']: ', column_sum)
-			
+	print("Aggregate finished.")
+
+	for key in keys:
+		query.delete(key)
+
+	for key in keys:
+		if len(query.select(key, 0, [1,1,1,1,1])) != 0:
+			print('delete error on ', key)
+	
+	print("Delete finished.")
+
 def benchmark():
 	db = Database()
 	grades_table = db.create_table('Grades', 5, 0)
@@ -145,7 +154,15 @@ def benchmark():
 		end_value = start_value + 100
 		result = query.sum(start_value, end_value - 1, randrange(0, 5))
 	agg_time_1 = perf_counter()
-	print("Aggregate 10k of 100 record batch took:\t", agg_time_1 - agg_time_0)
+	print("Aggregate 10k of 100 record batch took:\t\t", agg_time_1 - agg_time_0)
+
+	# Measuring Delete Performance
+	delete_time_0 = perf_counter()
+	for i in range(0, 10000):
+		query.delete(906659671 + i)
+	delete_time_1 = perf_counter()
+	print("Deleting 10k records took:  \t\t\t", delete_time_1 - delete_time_0)
+
 print("Validate: ")
 validate()
 print("Benchmark: ")

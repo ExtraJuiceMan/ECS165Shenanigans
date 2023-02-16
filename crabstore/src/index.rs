@@ -50,6 +50,14 @@ impl Index {
             }
         }
     }
+
+    pub fn remove_index(&mut self, column_number: usize, value: i64, rid: BaseRID) {
+        if let Some(ref mut index) = self.indices[column_number] {
+            if let Some(ref mut rids) = index.get_mut(&value) {
+                rids.retain(|x| x.raw() != rid.raw());
+            }
+        }
+    }
     pub fn get_from_index(&self, column_number: usize, value: i64) -> Option<Vec<BaseRID>> {
         self.indices[column_number]
             .as_ref()

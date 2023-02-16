@@ -100,14 +100,14 @@ impl PageRange {
         )
     }
     pub fn merge_values(&self, base_rid: &BaseRID, columns: &Vec<Option<i64>>) -> Vec<i64> {
-        match self.is_latest(&base_rid) {
+        match self.is_latest(base_rid) {
             true => self.merge_values_given_page(
                 base_rid,
-                self.get_base_page(&base_rid).unwrap(),
+                self.get_base_page(base_rid).unwrap(),
                 columns,
             ),
             false => {
-                let new_rid = self.find_latest(&base_rid);
+                let new_rid = self.find_latest(base_rid);
                 let page = self.get_tail_page(&new_rid);
                 self.merge_values_given_page(&new_rid, page.unwrap(), columns)
             }
@@ -117,7 +117,7 @@ impl PageRange {
         &self,
         rid: &impl RID,
         page: &Page,
-        columns: &Vec<Option<i64>>,
+        columns: &[Option<i64>],
     ) -> Vec<i64> {
         columns
             .iter()
