@@ -1,0 +1,10 @@
+To build and run from root directory:
+
+cd lstore
+python3 -m venv .env
+./.env/bin/activate (or equivalent on other OS)
+pip install maturin
+maturin develop --release
+python ../__main__.py
+
+A pre-compiled Windows build has been included.
