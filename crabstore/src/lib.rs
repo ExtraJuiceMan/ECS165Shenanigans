@@ -3,7 +3,18 @@ use pyo3::{
     prelude::*,
     types::{PyList, PyTuple},
 };
-use std::{borrow::Borrow, cell::RefCell, mem::size_of};
+use rkyv::ser::{
+    serializers::{AllocScratch, CompositeSerializer, SharedSerializeMap, WriteSerializer},
+    Serializer,
+};
+use std::{
+    borrow::Borrow,
+    cell::RefCell,
+    fs::{self, File},
+    io::{self, BufWriter, Read, Write},
+    mem::size_of,
+    path::{Path, PathBuf},
+};
 use std::{collections::BTreeMap, collections::HashMap};
 const PAGE_SIZE: usize = 4096;
 const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
@@ -18,8 +29,13 @@ const METADATA_SCHEMA_ENCODING: usize = 3;
 // 0xFF...FF
 const RID_INVALID: i64 = !0;
 
+const BUFFERPOOL_SIZE: usize = 64;
+
+pub mod bufferpool;
+pub mod disk_manager;
 pub mod index;
 pub mod page;
+mod page_directory;
 pub mod rid;
 pub mod table;
 use crate::index::Index;
@@ -66,7 +82,34 @@ impl Record {
 #[derive(Clone, Debug, Default)]
 #[pyclass(subclass)]
 struct CrabStore {
+    directory: Option<PathBuf>,
     tables: HashMap<String, Py<Table>>,
+}
+
+impl CrabStore {
+    pub fn database_filename(&self) -> PathBuf {
+        self.directory
+            .as_ref()
+            .unwrap()
+            .join(Path::new("crab_dt.CRAB"))
+    }
+
+    pub fn table_filename(&self, table: &str) -> PathBuf {
+        let mut table_file = table.to_string();
+        table_file.push_str("_db.CRAB");
+
+        self.directory
+            .as_ref()
+            .unwrap()
+            .join(Path::new(&table_file))
+    }
+
+    pub fn page_dir_filename(&self, table: &str) -> PathBuf {
+        let mut pd_file = table.to_string();
+        pd_file.push_str("_pd.CRAB");
+
+        self.directory.as_ref().unwrap().join(Path::new(&pd_file))
+    }
 }
 
 #[pymethods]
@@ -74,6 +117,7 @@ impl CrabStore {
     #[new]
     pub fn new() -> Self {
         CrabStore {
+            directory: None,
             tables: HashMap::new(),
         }
     }
@@ -85,8 +129,23 @@ impl CrabStore {
         key_index: usize,
     ) -> Py<Table> {
         Python::with_gil(|py| -> Py<Table> {
-            let table: Py<Table> =
-                Py::new(py, Table::new(name.clone(), num_columns, key_index)).unwrap();
+            let table: Py<Table> = Py::new(
+                py,
+                Table::new(
+                    name.clone(),
+                    num_columns,
+                    key_index,
+                    self.table_filename(name.as_str())
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                    self.page_dir_filename(name.as_str())
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                ),
+            )
+            .unwrap();
             self.tables.insert(name.clone(), Py::clone_ref(&table, py));
             table
         })
@@ -99,6 +158,77 @@ impl CrabStore {
 
     pub fn get_table(&self, name: String) -> Py<Table> {
         Py::clone(self.tables.get(&name).unwrap())
+    }
+
+    pub fn open(&mut self, path: String) {
+        fs::create_dir_all(&path);
+        self.directory = Some(Path::new(&path).into());
+        let crab_file = File::options().read(true).open(self.database_filename());
+
+        if crab_file.is_err() && crab_file.as_ref().unwrap_err().kind() == io::ErrorKind::NotFound {
+            File::options()
+                .write(true)
+                .create(true)
+                .open(self.database_filename())
+                .expect("Failed to open database file");
+
+            return;
+        }
+
+        let mut crab_file = crab_file.unwrap();
+
+        let mut crab_bytes = Vec::new();
+        crab_file.read_to_end(&mut crab_bytes);
+
+        let table_names = unsafe {
+            rkyv::from_bytes_unchecked::<Vec<String>>(&crab_bytes)
+                .expect("Failed to deserialize database file")
+        };
+
+        for name in table_names.iter() {
+            Python::with_gil(|py| {
+                self.tables.insert(
+                    name.to_string(),
+                    Py::new(
+                        py,
+                        Table::load(
+                            name,
+                            &self.table_filename(name.as_ref()),
+                            &self.page_dir_filename(name.as_ref()),
+                        ),
+                    )
+                    .unwrap(),
+                )
+            });
+        }
+    }
+
+    pub fn close(&mut self) {
+        let crab_file = File::options()
+            .write(true)
+            .truncate(true)
+            .open(self.database_filename())
+            .expect("Failed to open database file");
+
+        let mut serializer = CompositeSerializer::new(
+            WriteSerializer::new(BufWriter::new(crab_file)),
+            AllocScratch::default(),
+            SharedSerializeMap::new(),
+        );
+
+        let table_names = self.tables.keys().cloned().collect::<Vec<String>>();
+
+        serializer
+            .serialize_value(&table_names)
+            .expect("Unable to serialize table names");
+
+        let (buf, _, _) = serializer.into_components();
+
+        buf.into_inner().flush();
+
+        for table in self.tables.values() {
+            Python::with_gil(|py| table.borrow_mut(py).persist())
+        }
     }
 }
 

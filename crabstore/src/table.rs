@@ -1,14 +1,36 @@
-use crate::page::{Page, PageRange};
-use crate::rid::{BaseRID, TailRID, RID};
+use std::{mem::size_of, path::Path};
+
+use crate::{
+    disk_manager::DiskManager,
+    page::PhysicalPage,
+    rid::{BaseRID, TailRID, RID},
+};
 use crate::{index::Index, RID_INVALID};
+use crate::{
+    page::{Page, PageRange},
+    page_directory::PageDirectory,
+};
 use crate::{
     Record, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
 use rayon::{prelude::*, result};
+use rkyv::{
+    ser::{serializers::BufferSerializer, Serializer},
+    Archive, Deserialize, Serialize,
+};
 
-#[derive(Debug, Default)]
+#[derive(Archive, Deserialize, Serialize, Clone, Debug)]
+pub struct TableHeaderPage {
+    num_columns: usize,
+    primary_key_index: usize,
+    indexed_columns: usize,
+    next_free_page: usize,
+    next_rid: usize,
+    next_tid: usize,
+}
+
 #[pyclass(subclass)]
 pub struct Table {
     name: String,
@@ -17,9 +39,63 @@ pub struct Table {
     index: Index,
     next_rid: BaseRID,
     ranges: Vec<PageRange>,
+    page_dir: PageDirectory,
+    disk: DiskManager,
 }
 
 impl Table {
+    pub fn load(name: &str, db_file: &Path, pd_file: &Path) -> Self {
+        let disk = DiskManager::new(db_file).expect("Failed to open table file");
+
+        let mut page = PhysicalPage::default();
+
+        disk.read_page(0, &mut page);
+
+        let header = unsafe {
+            rkyv::from_bytes_unchecked::<TableHeaderPage>(
+                &page.page[0..size_of::<<TableHeaderPage as Archive>::Archived>()],
+            )
+            .expect("Failed to deserialize table header")
+        };
+
+        let index = Index::new(header.primary_key_index, header.num_columns);
+
+        let page_dir = PageDirectory::load(pd_file);
+
+        Table {
+            name: name.into(),
+            num_columns: header.num_columns,
+            primary_key_index: header.primary_key_index,
+            index,
+            next_rid: 0.into(),
+            ranges: Vec::new(),
+            page_dir,
+            disk,
+        }
+    }
+
+    pub fn persist(&mut self) {
+        let header = TableHeaderPage {
+            num_columns: self.num_columns,
+            primary_key_index: self.primary_key_index,
+            next_rid: 100,
+            next_tid: 250,
+            next_free_page: 366,
+            indexed_columns: 525,
+        };
+
+        let mut page = PhysicalPage::default();
+        let mut serializer = BufferSerializer::new(&mut page.page);
+
+        serializer
+            .serialize_value(&header)
+            .expect("Unable to serialize table header");
+
+        self.disk.write_page(0, &page);
+        self.disk.flush();
+        self.page_dir.persist();
+    }
+
     fn get_page_range(&self, range_number: usize) -> &PageRange {
         &self.ranges[range_number]
     }
@@ -181,7 +257,16 @@ impl Table {
     }
 
     #[new]
-    pub fn new(name: String, num_columns: usize, key_index: usize) -> Table {
+    pub fn new(
+        name: String,
+        num_columns: usize,
+        key_index: usize,
+        db_file: String,
+        pd_file: String,
+    ) -> Table {
+        let page_dir = PageDirectory::new(Path::new(&pd_file));
+        let disk = DiskManager::new(Path::new(&db_file)).unwrap();
+
         Table {
             name,
             num_columns,
@@ -189,6 +274,8 @@ impl Table {
             index: Index::new(key_index, num_columns),
             next_rid: 0.into(),
             ranges: Vec::new(),
+            page_dir,
+            disk,
         }
     }
     pub fn sum(&self, start_range: i64, end_range: i64, column_index: usize) -> i64 {

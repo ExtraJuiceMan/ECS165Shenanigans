@@ -8,31 +8,36 @@ use std::{
     cell::RefCell,
     collections::btree_map::Values,
     fmt::Display,
+    mem::size_of,
 };
-#[derive(Debug)]
+
 pub struct PhysicalPage {
-    page: [i64; crate::PAGE_SLOTS],
+    pub page: [u8; crate::PAGE_SIZE],
 }
 
 impl Default for PhysicalPage {
     fn default() -> Self {
         PhysicalPage {
-            page: [0; crate::PAGE_SLOTS],
+            page: [0; crate::PAGE_SIZE],
         }
     }
 }
 
 impl PhysicalPage {
     pub fn slot(&self, index: usize) -> i64 {
-        self.page[index]
+        i64::from_ne_bytes(
+            self.page[size_of::<i64>() * index..size_of::<i64>() * (index + 1)]
+                .try_into()
+                .unwrap(),
+        )
     }
 
     pub fn write_slot(&mut self, index: usize, value: i64) {
-        self.page[index] = value;
+        self.page[size_of::<i64>() * index..size_of::<i64>() * (index + 1)]
+            .copy_from_slice(i64::to_ne_bytes(value).as_slice())
     }
 }
 
-#[derive(Debug)]
 pub struct Page {
     columns: Box<[PhysicalPage]>,
 }
@@ -56,11 +61,10 @@ impl Page {
         self.columns.as_ref()[column].borrow().slot(rid.slot())
     }
     pub fn write_slot(&mut self, column: usize, rid: &impl RID, value: i64) {
-        (&mut self.columns[column]).page[rid.slot()] = value;
+        self.columns[column].write_slot(rid.slot(), value);
     }
 }
 
-#[derive(Debug)]
 pub struct PageRange {
     num_columns: usize,
     tail_id: usize,
