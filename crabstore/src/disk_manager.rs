@@ -25,18 +25,34 @@ impl DiskManager {
     }
 
     pub fn flush(&mut self) {
-        self.file.flush();
+        self.file.flush().expect("Failed to flush file to disk");
     }
 
-    pub fn read_page(&self, page_id: usize, page: &mut PhysicalPage) {
+    #[cfg(target_os = "windows")]
+    pub fn read_page(&self, page_id: usize, page: &mut [u8; PAGE_SIZE]) {
         self.file
-            .seek_read(&mut page.page, (page_id * PAGE_SIZE) as u64)
+            .seek_read(page, (page_id * PAGE_SIZE) as u64)
             .expect("Failed to read page");
     }
 
+    #[cfg(target_os = "linux")]
+    fn read_page(&self, page_id: usize, block: &mut [u8; PAGE_SIZE]) {
+        self.file
+            .read_exact_at(&mut page.page, (page_id * PAGE_SIZE) as u64)
+            .expect("Failed to read page");
+    }
+
+    #[cfg(target_os = "windows")]
     pub fn write_page(&self, page_id: usize, page: &PhysicalPage) {
         self.file
             .seek_write(&page.page, (page_id * PAGE_SIZE) as u64)
+            .expect("Failed to write page");
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn write_page(&self, page_id: usize, page: &PhysicalPage) {
+        self.file
+            .write_all_at(&page.page, (page_id * PAGE_SIZE) as u64)
             .expect("Failed to write page");
     }
 
@@ -47,6 +63,10 @@ impl DiskManager {
 
     pub fn reserve_range(&mut self, pages: usize) -> usize {
         self.next_free_page += pages;
+        self.next_free_page
+    }
+
+    pub fn free_page_pointer(&self) -> usize {
         self.next_free_page
     }
 }

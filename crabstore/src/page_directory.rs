@@ -10,7 +10,7 @@ use nohash::BuildNoHashHasher;
 use rkyv::{
     ser::{
         serializers::{
-            AllocScratch, AllocSerializer, CompositeSerializer, SharedSerializeMap, WriteSerializer,
+            AllocScratch, CompositeSerializer, SharedSerializeMap, WriteSerializer,
         },
         Serializer,
     },
@@ -81,12 +81,11 @@ impl PageDirectory {
     }
 
     pub fn persist(&mut self) {
-        self.directory.insert(1, PageDirectoryEntry::new(5));
         let pd_file = File::options()
             .write(true)
             .truncate(true)
             .open(self.path.clone())
-            .unwrap();
+            .expect("Unable to open page directory file");
 
         let mut serializer = CompositeSerializer::new(
             WriteSerializer::new(BufWriter::new(pd_file)),

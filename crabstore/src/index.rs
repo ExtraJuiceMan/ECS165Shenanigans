@@ -32,6 +32,7 @@ impl fmt::Display for Index {
         Ok(())
     }
 }
+
 impl Index {
     pub fn new(key_index: usize, num_columns: usize) -> Self {
         let mut indices = Vec::with_capacity(num_columns);
@@ -39,6 +40,27 @@ impl Index {
         indices[key_index] = Some(BTreeMap::new());
 
         Index { indices }
+    }
+
+    pub fn index_meta_to_bit_vector(&self) -> usize {
+        let mut bit_vector: usize = 0;
+        for (i, x) in self.indices.iter().enumerate() {
+            if x.is_none() {
+                continue;
+            }
+
+            bit_vector |= 1 << i;
+        }
+
+        bit_vector
+    }
+
+    pub fn index_meta_from_bit_vector(&mut self, bit_vector: usize) {
+        for idx in 0..self.indices.len() {
+            if (1 << idx) & bit_vector != 0 {
+                self.create_index(idx);
+            }
+        }
     }
 
     pub fn update_index(&mut self, column_number: usize, value: i64, rid: BaseRID) {
@@ -58,6 +80,7 @@ impl Index {
             }
         }
     }
+
     pub fn get_from_index(&self, column_number: usize, value: i64) -> Option<Vec<BaseRID>> {
         self.indices[column_number]
             .as_ref()
@@ -66,6 +89,7 @@ impl Index {
                 Some(rids) => rids.clone(),
             })
     }
+
     pub fn range_from_index(
         &self,
         column_number: usize,
@@ -78,6 +102,7 @@ impl Index {
                 .collect::<Vec<BaseRID>>()
         })
     }
+
     pub fn create_index(&mut self, column_number: usize) {
         self.indices[column_number] = Some(BTreeMap::new());
     }

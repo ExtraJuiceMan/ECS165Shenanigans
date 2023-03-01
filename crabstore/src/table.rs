@@ -49,7 +49,7 @@ impl Table {
 
         let mut page = PhysicalPage::default();
 
-        disk.read_page(0, &mut page);
+        disk.read_page(0, &mut page.page);
 
         let header = unsafe {
             rkyv::from_bytes_unchecked::<TableHeaderPage>(
@@ -80,8 +80,8 @@ impl Table {
             primary_key_index: self.primary_key_index,
             next_rid: 100,
             next_tid: 250,
-            next_free_page: 366,
-            indexed_columns: 525,
+            next_free_page: self.disk.free_page_pointer(),
+            indexed_columns: self.index.index_meta_to_bit_vector(),
         };
 
         let mut page = PhysicalPage::default();
