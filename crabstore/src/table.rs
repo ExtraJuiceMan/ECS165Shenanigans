@@ -1,6 +1,7 @@
 use std::{mem::size_of, path::Path};
 
 use crate::{
+    bufferpool::BufferPool,
     disk_manager::DiskManager,
     page::PhysicalPage,
     rid::{BaseRID, TailRID, RID},
@@ -13,9 +14,9 @@ use crate::{
 use crate::{
     Record, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS,
 };
+use parking_lot::RwLock;
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
-use rayon::{prelude::*, result};
 use rkyv::{
     ser::{serializers::BufferSerializer, Serializer},
     Archive, Deserialize, Serialize,
@@ -38,9 +39,9 @@ pub struct Table {
     primary_key_index: usize,
     index: Index,
     next_rid: BaseRID,
-    ranges: Vec<PageRange>,
-    page_dir: PageDirectory,
+    page_dir: RwLock<PageDirectory>,
     disk: DiskManager,
+    bufferpool: BufferPool,
 }
 
 impl Table {
@@ -60,7 +61,11 @@ impl Table {
 
         let index = Index::new(header.primary_key_index, header.num_columns);
 
-        let page_dir = PageDirectory::load(pd_file);
+        index.create_indexes_from_bit_vector(header.indexed_columns);
+
+        let page_dir = RwLock::new(PageDirectory::load(pd_file));
+
+        let bufferpool = BufferPool::new(disk, 128);
 
         Table {
             name: name.into(),
@@ -68,9 +73,9 @@ impl Table {
             primary_key_index: header.primary_key_index,
             index,
             next_rid: 0.into(),
-            ranges: Vec::new(),
             page_dir,
             disk,
+            bufferpool,
         }
     }
 
@@ -91,9 +96,11 @@ impl Table {
             .serialize_value(&header)
             .expect("Unable to serialize table header");
 
-        self.disk.write_page(0, &page);
+        self.disk.write_page(0, &page.page);
         self.disk.flush();
-        self.page_dir.persist();
+
+        let page_dir = self.page_dir.write();
+        page_dir.persist();
     }
 
     fn get_page_range(&self, range_number: usize) -> &PageRange {
@@ -264,8 +271,9 @@ impl Table {
         db_file: String,
         pd_file: String,
     ) -> Table {
-        let page_dir = PageDirectory::new(Path::new(&pd_file));
+        let page_dir = RwLock::new(PageDirectory::new(Path::new(&pd_file)));
         let disk = DiskManager::new(Path::new(&db_file)).unwrap();
+        let bufferpool = BufferPool::new(disk, 128);
 
         Table {
             name,
@@ -273,9 +281,9 @@ impl Table {
             primary_key_index: key_index,
             index: Index::new(key_index, num_columns),
             next_rid: 0.into(),
-            ranges: Vec::new(),
             page_dir,
             disk,
+            bufferpool,
         }
     }
     pub fn sum(&self, start_range: i64, end_range: i64, column_index: usize) -> i64 {

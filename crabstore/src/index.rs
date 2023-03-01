@@ -55,7 +55,7 @@ impl Index {
         bit_vector
     }
 
-    pub fn index_meta_from_bit_vector(&mut self, bit_vector: usize) {
+    pub fn create_indexes_from_bit_vector(&mut self, bit_vector: usize) {
         for idx in 0..self.indices.len() {
             if (1 << idx) & bit_vector != 0 {
                 self.create_index(idx);
