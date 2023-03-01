@@ -60,7 +60,6 @@ dependencies = [
  "parking_lot",
  "pyo3",
  "rayon",
- "rclite",
  "rkyv",
 ]
 
@@ -346,12 +345,6 @@ dependencies = [
  "crossbeam-utils",
  "num_cpus",
 ]
-
-[[package]]
-name = "rclite"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4d99e2fa5e9669d5cca1a1e54bf5ddcbbc45d7afe93646627f05bcbbf27c257"
 
 [[package]]
 name = "redox_syscall"

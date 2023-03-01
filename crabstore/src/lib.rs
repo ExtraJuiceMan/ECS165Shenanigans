@@ -1,3 +1,6 @@
+#![feature(new_uninit)]
+#![feature(get_mut_unchecked)]
+
 use core::fmt;
 use pyo3::{
     prelude::*,
@@ -27,7 +30,7 @@ const METADATA_RID: usize = 1;
 const METADATA_TIMESTAMP: usize = 2;
 const METADATA_SCHEMA_ENCODING: usize = 3;
 // 0xFF...FF
-const RID_INVALID: i64 = !0;
+const RID_INVALID: u64 = !0;
 
 const BUFFERPOOL_SIZE: usize = 64;
 

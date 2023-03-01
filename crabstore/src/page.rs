@@ -1,5 +1,9 @@
+use parking_lot::lock_api::RwLock;
+use rclite::Arc;
+
 use crate::{
-    rid::{self, BaseRID, TailRID, RID},
+    bufferpool::{BufferPool, BufferPoolFrame},
+    rid::{self, RID},
     METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS, PAGE_SLOTS,
 };
 use std::{
@@ -9,6 +13,7 @@ use std::{
     collections::btree_map::Values,
     fmt::Display,
     mem::size_of,
+    rc::Rc,
 };
 
 pub struct PhysicalPage {
@@ -24,44 +29,41 @@ impl Default for PhysicalPage {
 }
 
 impl PhysicalPage {
-    pub fn slot(&self, index: usize) -> i64 {
-        i64::from_ne_bytes(
-            self.page[size_of::<i64>() * index..size_of::<i64>() * (index + 1)]
+    pub fn slot(&self, index: usize) -> u64 {
+        u64::from_ne_bytes(
+            self.page[size_of::<u64>() * index..size_of::<u64>() * (index + 1)]
                 .try_into()
                 .unwrap(),
         )
     }
 
-    pub fn write_slot(&mut self, index: usize, value: i64) {
-        self.page[size_of::<i64>() * index..size_of::<i64>() * (index + 1)]
-            .copy_from_slice(i64::to_ne_bytes(value).as_slice())
+    pub fn write_slot(&mut self, index: usize, value: u64) {
+        self.page[size_of::<u64>() * index..size_of::<u64>() * (index + 1)]
+            .copy_from_slice(u64::to_ne_bytes(value).as_slice())
     }
 }
 
 pub struct Page {
-    columns: Box<[PhysicalPage]>,
+    column_pages: Arc<[usize]>,
 }
 
 impl Page {
-    pub fn new(num_columns: usize) -> Self {
-        let mut columns: Vec<PhysicalPage> = Vec::with_capacity(NUM_METADATA_COLUMNS + num_columns);
-        columns.resize_with(NUM_METADATA_COLUMNS + num_columns, Default::default);
-        let columns = columns.into_boxed_slice();
-
-        Page { columns }
+    pub fn new(column_pages: Arc<[usize]>) -> Self {
+        Page { column_pages }
     }
 
-    pub fn get_column(&self, index: usize) -> &PhysicalPage {
-        self.columns.as_ref()[index].borrow()
+    pub fn get_column(&self, bp: &mut BufferPool, index: usize) -> Arc<BufferPoolFrame> {
+        bp.get_page(self.column_pages[index])
     }
-    pub fn get_column_mut(&mut self, index: usize) -> &mut PhysicalPage {
-        &mut self.columns[index]
+
+    pub fn slot(&self, bp: &mut BufferPool, column: usize, rid: RID) -> u64 {
+        self.get_column(bp, self.column_pages[column])
+            .slot(rid.slot())
     }
-    pub fn get_slot(&self, column: usize, rid: &impl RID) -> i64 {
-        self.columns.as_ref()[column].borrow().slot(rid.slot())
-    }
-    pub fn write_slot(&mut self, column: usize, rid: &impl RID, value: i64) {
-        self.columns[column].write_slot(rid.slot(), value);
+
+    pub fn write_slot(&mut self, bp: &mut BufferPool, column: usize, rid: RID, value: u64) {
+        self.get_column(bp, self.column_pages[column])
+            .write_slot(rid.slot(), value);
     }
 }
 
@@ -119,7 +121,7 @@ impl PageRange {
     }
     pub fn merge_values_given_page(
         &self,
-        rid: &impl RID,
+        rid: RID,
         page: &Page,
         columns: &[Option<i64>],
     ) -> Vec<i64> {
@@ -181,9 +183,11 @@ impl PageRange {
             self.tail_pages.push(Page::new(self.num_columns));
         }
     }
+
     pub fn get_base_page(&self, rid: &BaseRID) -> Option<&Page> {
         Some(&self.base_pages[rid.page()])
     }
+
     pub fn get_tail_page(&self, rid: &TailRID) -> Option<&Page> {
         if !self.page_exists(rid) {
             None
@@ -191,9 +195,11 @@ impl PageRange {
             Some(&self.tail_pages[rid.page()])
         }
     }
+
     pub fn get_base_page_mut(&mut self, rid: &BaseRID) -> Option<&mut Page> {
         Some(&mut self.base_pages[rid.page()])
     }
+
     pub fn get_tail_page_mut(&mut self, rid: &TailRID) -> Option<&mut Page> {
         if !self.page_exists(rid) {
             None

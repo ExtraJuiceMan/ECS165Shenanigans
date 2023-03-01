@@ -1,77 +1,70 @@
-use crate::PAGE_SLOTS;
+use std::mem::size_of;
+
+use crate::PAGE_RANGE_SIZE;
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct BaseRID {
-    rid: i64,
-}
-pub struct TailRID {
-    rid: i64,
+pub struct RID {
+    rid: u64,
 }
 
-pub trait RID {
-    fn slot(&self) -> usize;
-    fn page_range(&self) -> usize;
-    fn raw(&self) -> i64;
-    fn page(&self) -> usize;
-}
-impl RID for BaseRID {
-    fn slot(&self) -> usize {
-        (self.rid & 0b111111111) as usize
-    }
-    fn page_range(&self) -> usize {
-        (self.rid >> 13) as usize
-    }
-    fn raw(&self) -> i64 {
-        self.rid
-    }
-    fn page(&self) -> usize {
-        ((self.rid >> 9) & 0b1111) as usize
-    }
-}
-impl BaseRID {
-    pub fn new(rid: i64) -> Self {
-        BaseRID { rid }
-    }
-    pub fn next(&self) -> Self {
-        BaseRID { rid: self.rid + 1 }
-    }
-}
-impl From<i64> for BaseRID {
-    fn from(value: i64) -> Self {
-        BaseRID { rid: value }
-    }
-}
-impl RID for TailRID {
-    fn page_range(&self) -> usize {
-        (self.rid & 0b11111111111111111111111111111111) as usize
+impl RID {
+    /*
+        MSB set, then tail since tail grows downwards from 64 bit max
+    */
+    fn is_tail(&self) -> bool {
+        self.rid & (1 << (size_of::<usize>() * 8)) != 0
     }
 
-    fn slot(&self) -> usize {
-        self.id() % PAGE_SLOTS
-    }
-
-    fn raw(&self) -> i64 {
-        self.rid
-    }
-    fn page(&self) -> usize {
-        self.id() / PAGE_SLOTS
-    }
-}
-impl TailRID {
-    pub fn new(rid: i64) -> Self {
-        TailRID { rid }
-    }
-    pub fn new_tail(page_range: usize, id: usize) -> Self {
-        TailRID {
-            rid: ((page_range | (id << 32)) | 1 << 63) as i64,
+    /*
+       "Untail" the page if it is a tail by inverting the bits to create readable numbers
+    */
+    fn untail(&self) -> usize {
+        if self.is_tail() {
+            !self.rid
+        } else {
+            self.rid
         }
     }
-    pub fn id(&self) -> usize {
-        ((self.rid >> 32) & 0b1111111111111111111111111111111) as usize
+
+    /*
+        We untail because we want the offset from the start of the page
+    */
+    pub fn slot(&self) -> usize {
+        (self.untail() & 0b111111111) as usize
+    }
+
+    /*
+       No untail here since we want unique page sequences and the
+       pages are virtually mapped by our directory anyway
+    */
+    pub fn page(&self) -> usize {
+        ((self.rid >> 9) & 0b1111) as usize
+    }
+
+    pub fn page_range(&self) -> usize {
+        self.page() / PAGE_RANGE_SIZE
+    }
+
+    pub fn raw(&self) -> u64 {
+        self.rid
+    }
+
+    /*
+        Tail RIDs grow downwards.
+    */
+    pub fn next(&self) -> RID {
+        RID {
+            rid: if self.is_tail() {
+                self.rid - 1
+            } else {
+                self.rid + 1
+            },
+        }
     }
 }
-impl From<i64> for TailRID {
-    fn from(value: i64) -> Self {
-        TailRID { rid: value }
+
+impl From<u64> for RID {
+    fn from(value: u64) -> Self {
+        RID { rid: value }
     }
 }

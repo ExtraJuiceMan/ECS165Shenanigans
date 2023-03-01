@@ -3,45 +3,67 @@ use std::{
     collections::HashMap,
     fs::File,
     io::{BufReader, BufWriter, Read, Write},
+    ops::RangeBounds,
     path::{Path, PathBuf},
+    rc::Rc,
+    slice::SliceIndex,
+    sync::Arc,
 };
 
 use nohash::BuildNoHashHasher;
 use rkyv::{
+    de::{deserializers::SharedDeserializeMap, SharedDeserializeRegistry},
     ser::{
-        serializers::{
-            AllocScratch, CompositeSerializer, SharedSerializeMap, WriteSerializer,
-        },
+        serializers::{AllocScratch, CompositeSerializer, SharedSerializeMap, WriteSerializer},
         Serializer,
     },
     Archive, Deserialize, Serialize,
 };
 
-#[derive(Archive, Deserialize, Serialize, Clone)]
-pub struct PageDirectoryEntry {
-    col_pages: Box<[usize]>,
-}
-
-impl PageDirectoryEntry {
-    pub fn new(num_columns: usize) -> Self {
-        let mut columns: Vec<usize> = Vec::with_capacity(crate::NUM_METADATA_COLUMNS + num_columns);
-        columns.resize_with(crate::NUM_METADATA_COLUMNS + num_columns, Default::default);
-        PageDirectoryEntry {
-            col_pages: columns.into_boxed_slice(),
-        }
-    }
-
-    pub fn column_page(&self, index: usize) -> usize {
-        self.col_pages[index]
-    }
-}
+use crate::rid::RID;
 
 pub struct PageDirectory {
     path: PathBuf,
-    directory: HashMap<usize, PageDirectoryEntry, BuildNoHashHasher<usize>>,
+    directory: HashMap<usize, Arc<[usize]>, BuildNoHashHasher<usize>>,
 }
 
 impl PageDirectory {
+    pub fn get(&self, rid: RID) -> Arc<[usize]> {
+        Arc::clone(
+            self.directory
+                .get(&rid.page())
+                .expect("Page requested from directory but it doesn't exist"),
+        )
+    }
+
+    pub fn set(&mut self, rid: RID, page_ids: &[Option<usize>]) {
+        if let Some(current_vals) = self.directory.get_mut(&rid.page()) {
+            let mut cols_clone = Arc::<[usize]>::new_uninit_slice(current_vals.len());
+
+            for (i, potential_page) in page_ids.into_iter().enumerate() {
+                if let Some(new_page) = potential_page {
+                    cols_clone[i].write(*new_page);
+                } else {
+                    cols_clone[i].write(current_vals[i]);
+                }
+            }
+
+            self.directory
+                .insert(rid.page(), unsafe { cols_clone.assume_init() });
+
+            return;
+        }
+
+        let entry = Arc::<[usize]>::new_uninit_slice(page_ids.len());
+
+        for (i, x) in page_ids.into_iter().enumerate() {
+            entry[i].write(x.expect("Must provide all columns of page dir entry if new"));
+        }
+
+        self.directory
+            .insert(rid.page(), unsafe { entry.assume_init() });
+    }
+
     pub fn new(path: &Path) -> Self {
         if !path.exists() {
             File::create(path).unwrap();
@@ -55,7 +77,6 @@ impl PageDirectory {
 
     pub fn load(path: &Path) -> Self {
         if !path.exists() {
-            File::create(path).unwrap();
             return PageDirectory::new(path);
         }
 
@@ -67,15 +88,13 @@ impl PageDirectory {
             .expect("Unable to read page directory file");
 
         let archived = unsafe {
-            rkyv::archived_root::<HashMap<usize, PageDirectoryEntry, BuildNoHashHasher<usize>>>(
-                &pd_bytes,
-            )
+            rkyv::archived_root::<HashMap<usize, Arc<[usize]>, BuildNoHashHasher<usize>>>(&pd_bytes)
         };
 
         PageDirectory {
             path: path.into(),
             directory: archived
-                .deserialize(&mut rkyv::Infallible)
+                .deserialize(&mut SharedDeserializeMap::new())
                 .expect("Failed to deserialize page directory"),
         }
     }

@@ -1,13 +1,13 @@
 use std::{
     collections::{HashMap, VecDeque},
+    io::Read,
     sync::{
         atomic::{self, Ordering},
-        Mutex, RwLock,
+        Mutex, RwLock, Arc,
     },
 };
 
 use nohash::BuildNoHashHasher;
-use rclite::Arc;
 
 use crate::{disk_manager::DiskManager, page::PhysicalPage};
 
@@ -32,6 +32,22 @@ impl BufferPoolFrame {
 
     pub fn get_page_id(&self) {
         self.page_id.load(Ordering::SeqCst);
+    }
+
+    pub fn slot(&self, slot: usize) -> u64 {
+        let page = self
+            .page
+            .read()
+            .expect("Couldn't lock physical page, poisoned?");
+        page.slot(slot)
+    }
+
+    pub fn write_slot(&self, slot: usize, value: u64) {
+        let page = self
+            .page
+            .write()
+            .expect("Couldn't lock physical page, poisoned?");
+        page.write_slot(slot, value);
     }
 }
 

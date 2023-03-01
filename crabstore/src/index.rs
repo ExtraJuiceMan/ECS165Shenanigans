@@ -1,4 +1,4 @@
-use crate::rid::{BaseRID, RID};
+use crate::rid::RID;
 use core::fmt;
 use pyo3::prelude::*;
 use std::ops::Bound::Included;
@@ -11,7 +11,7 @@ use std::{
 #[pyclass(subclass)]
 //change to BTreeMap when we need to implement ranges
 pub struct Index {
-    indices: Vec<Option<BTreeMap<i64, Vec<BaseRID>>>>,
+    indices: Vec<Option<BTreeMap<u64, Vec<RID>>>>,
 }
 impl fmt::Display for Index {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -63,7 +63,7 @@ impl Index {
         }
     }
 
-    pub fn update_index(&mut self, column_number: usize, value: i64, rid: BaseRID) {
+    pub fn update_index(&mut self, column_number: usize, value: u64, rid: RID) {
         if let Some(ref mut index) = self.indices[column_number] {
             if let Some(ref mut rids) = index.get_mut(&value) {
                 rids.push(rid);
@@ -73,7 +73,7 @@ impl Index {
         }
     }
 
-    pub fn remove_index(&mut self, column_number: usize, value: i64, rid: BaseRID) {
+    pub fn remove_index(&mut self, column_number: usize, value: u64, rid: RID) {
         if let Some(ref mut index) = self.indices[column_number] {
             if let Some(ref mut rids) = index.get_mut(&value) {
                 rids.retain(|x| x.raw() != rid.raw());
@@ -81,7 +81,7 @@ impl Index {
         }
     }
 
-    pub fn get_from_index(&self, column_number: usize, value: i64) -> Option<Vec<BaseRID>> {
+    pub fn get_from_index(&self, column_number: usize, value: u64) -> Option<Vec<RID>> {
         self.indices[column_number]
             .as_ref()
             .map(|map| match map.get(&value) {
@@ -90,16 +90,11 @@ impl Index {
             })
     }
 
-    pub fn range_from_index(
-        &self,
-        column_number: usize,
-        begin: i64,
-        end: i64,
-    ) -> Option<Vec<BaseRID>> {
+    pub fn range_from_index(&self, column_number: usize, begin: u64, end: u64) -> Option<Vec<RID>> {
         self.indices[column_number].as_ref().map(|map| {
             map.range((Included(begin), Included(end)))
                 .flat_map(|item| item.1.clone())
-                .collect::<Vec<BaseRID>>()
+                .collect::<Vec<RID>>()
         })
     }
 
