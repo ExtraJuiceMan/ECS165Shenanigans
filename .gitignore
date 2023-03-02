@@ -5,3 +5,6 @@
 __pycache__
 target
 valgrind-python.supp
+test/crab_dt.CRAB
+.gitignore
+test/Grades_pd.CRAB

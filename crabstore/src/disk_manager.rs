@@ -47,9 +47,9 @@ impl DiskManager {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn read_page(&self, page_id: usize, block: &mut [u8; PAGE_SIZE]) -> usize {
+    pub fn read_page(&self, page_id: usize, page: &mut [u8; PAGE_SIZE]) -> usize {
         let file = self.file.lock();
-        file.read_at(&mut page.page, (page_id * PAGE_SIZE) as u64)
+        file.read_at(page, (page_id * PAGE_SIZE) as u64)
             .expect("Failed to read page")
     }
 
