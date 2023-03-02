@@ -55,6 +55,12 @@ impl Page {
         Page { column_pages }
     }
 
+    pub fn print_cols(&self) {
+        for x in self.column_pages.iter() {
+            println!("Base/Tail Page Column = Page {x}");
+        }
+    }
+
     pub fn get_column(&self, bp: &mut BufferPool, index: usize) -> Arc<BufferPoolFrame> {
         bp.get_page(self.column_pages[index])
     }

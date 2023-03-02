@@ -1,16 +1,6 @@
-use std::{
-    borrow::BorrowMut,
-    mem::size_of,
-    path::Path,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-};
-
 use crate::{
     bufferpool::BufferPool, disk_manager::DiskManager, page::PhysicalPage, rid::RID,
-    PAGE_RANGE_SIZE, PAGE_SIZE, PAGE_SLOTS,
+    PAGE_RANGE_COUNT, PAGE_RANGE_SIZE, PAGE_SIZE, PAGE_SLOTS,
 };
 use crate::{index::Index, RID_INVALID};
 use crate::{
@@ -26,6 +16,16 @@ use pyo3::types::{PyList, PyTuple};
 use rkyv::{
     ser::{serializers::BufferSerializer, Serializer},
     Archive, Deserialize, Serialize,
+};
+use std::backtrace::Backtrace;
+use std::{
+    borrow::BorrowMut,
+    mem::size_of,
+    path::Path,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 #[derive(Archive, Deserialize, Serialize, Clone, Debug)]
@@ -328,6 +328,10 @@ impl Table {
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
             .slot(rid.slot());
 
+        if (rid.raw() == 0) {
+            println!("Latest for 0: {}", indir);
+        }
+
         if indir == RID_INVALID {
             rid
         } else {
@@ -428,13 +432,15 @@ impl Table {
                 let page = self.get_page(rid);
 
                 for i in included_columns.iter() {
-                    result_cols.append(
-                        page.get_column(
-                            self.bufferpool.lock().borrow_mut(),
-                            NUM_METADATA_COLUMNS + i,
+                    result_cols
+                        .append(
+                            page.get_column(
+                                self.bufferpool.lock().borrow_mut(),
+                                NUM_METADATA_COLUMNS + i,
+                            )
+                            .slot(rid.slot()),
                         )
-                        .slot(rid.slot()),
-                    );
+                        .expect("Failed to append to python list");
                 }
 
                 let original_rid = page
@@ -458,7 +464,10 @@ impl Table {
                 )
                 .unwrap();
 
-                selected_records.as_ref(py).append(record);
+                selected_records
+                    .as_ref(py)
+                    .append(record)
+                    .expect("Failed to append to python list");
             }
             selected_records
         })
@@ -621,11 +630,11 @@ impl Table {
                 let mut page_dir = self.page_dir.write();
                 // Check again since unlocking read and acquiring write are not atomic
                 if page_dir.get(rid).is_none() {
-                    let reserve_count = self.total_columns() * PAGE_RANGE_SIZE;
+                    let reserve_count = self.total_columns() * PAGE_RANGE_COUNT;
                     let reserved = self.disk.reserve_range(reserve_count);
 
-                    for i in 0..PAGE_RANGE_SIZE {
-                        let page_id = (rid.page_range() * PAGE_RANGE_SIZE) + i;
+                    for i in 0..PAGE_RANGE_COUNT {
+                        let page_id = (rid.page_range() * PAGE_RANGE_COUNT) + i;
                         let mut column_pages =
                             Arc::<[usize]>::new_uninit_slice(self.total_columns());
 
@@ -650,13 +659,19 @@ impl Table {
             Some(cols) => cols,
         };
 
-        let page = Page::new(page);
+        if (rid.raw() == 0) {
+            for x in page.iter() {
+                println!("Page Col: {x}");
+            }
+        }
 
-        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
-            .write_slot(rid.slot(), rid.raw());
+        let page = Page::new(page);
 
         page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
             .write_slot(rid.slot(), RID_INVALID);
+
+        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
+            .write_slot(rid.slot(), rid.raw());
 
         page.get_column(
             self.bufferpool.lock().borrow_mut(),
@@ -669,7 +684,7 @@ impl Table {
                 self.bufferpool.lock().borrow_mut(),
                 NUM_METADATA_COLUMNS + i,
             )
-            .write_slot(rid.slot(), val.extract().unwrap())
+            .write_slot(rid.slot(), val.extract().unwrap());
         }
 
         self.index.update_index(

@@ -35,31 +35,31 @@ impl DiskManager {
     }
 
     #[cfg(target_os = "windows")]
-    pub fn read_page(&self, page_id: usize, page: &mut [u8; PAGE_SIZE]) {
+    pub fn read_page(&self, page_id: usize, page: &mut [u8; PAGE_SIZE]) -> usize {
         let file = self.file.lock();
         file.seek_read(page, (page_id * PAGE_SIZE) as u64)
-            .expect("Failed to read page");
+            .expect("Failed to read page")
     }
 
     #[cfg(target_os = "linux")]
-    pub fn read_page(&self, page_id: usize, block: &mut [u8; PAGE_SIZE]) {
+    pub fn read_page(&self, page_id: usize, block: &mut [u8; PAGE_SIZE]) -> usize {
         let file = self.file.lock();
-        file.read_exact_at(&mut page.page, (page_id * PAGE_SIZE) as u64)
-            .expect("Failed to read page");
+        file.read_at(&mut page.page, (page_id * PAGE_SIZE) as u64)
+            .expect("Failed to read page")
     }
 
     #[cfg(target_os = "windows")]
-    pub fn write_page(&self, page_id: usize, page: &[u8; PAGE_SIZE]) {
+    pub fn write_page(&self, page_id: usize, page: &[u8; PAGE_SIZE]) -> usize {
         let file = self.file.lock();
         file.seek_write(page, (page_id * PAGE_SIZE) as u64)
-            .expect("Failed to write page");
+            .expect("Failed to write page")
     }
 
     #[cfg(target_os = "linux")]
-    pub fn write_page(&self, page_id: usize, page: &[u8; PAGE_SIZE]) {
+    pub fn write_page(&self, page_id: usize, page: &[u8; PAGE_SIZE]) -> usize {
         let file = self.file.lock();
-        file.write_all_at(page, (page_id * PAGE_SIZE) as u64)
-            .expect("Failed to write page");
+        file.write_at(page, (page_id * PAGE_SIZE) as u64)
+            .expect("Failed to write page")
     }
 
     pub fn reserve_page(&self) -> usize {

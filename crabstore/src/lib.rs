@@ -22,7 +22,8 @@ use std::{
 use std::{collections::BTreeMap, collections::HashMap};
 const PAGE_SIZE: usize = 4096;
 const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
-const PAGE_RANGE_SIZE: usize = PAGE_SIZE * 16;
+const PAGE_RANGE_COUNT: usize = 16;
+const PAGE_RANGE_SIZE: usize = PAGE_SIZE * PAGE_RANGE_COUNT;
 const RANGE_PAGE_COUNT: usize = PAGE_RANGE_SIZE / PAGE_SIZE;
 const NUM_METADATA_COLUMNS: usize = 4;
 

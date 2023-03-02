@@ -39,10 +39,13 @@ def validate():
 			key = 92106429 + randint(0, number_of_records)
 
 		records[key] = [key, randint(0, 20), randint(0, 20), randint(0, 20), randint(0, 20)]
+		
 		query.insert(*records[key])
 		# print('inserted', records[key])
 	print("Insert finished")
 
+	#db.close()
+	#exit()
 	# Check inserted records using select query
 	for key in records:
 		# select function will return array of records 
@@ -58,6 +61,8 @@ def validate():
 			pass
 			# print('select on', key, ':', record)
 	print("Select finished.")
+	
+	exit()
 	for key in records:
 		updated_columns = [None, None, None, None, None]
 		for i in range(2, grades_table.num_columns):

@@ -1,4 +1,5 @@
 use std::{
+    backtrace::Backtrace,
     borrow::Borrow,
     collections::{HashMap, VecDeque},
     io::Read,
@@ -36,7 +37,6 @@ impl BufferPoolFrame {
         disk.write_page(self.page_id.load(Ordering::SeqCst), &page.page);
 
         disk.flush();
-
         self.dirty.store(false, Ordering::SeqCst);
         self.page_id.store(!0, Ordering::SeqCst);
     }
@@ -45,8 +45,8 @@ impl BufferPoolFrame {
         self.dirty.store(true, Ordering::SeqCst);
     }
 
-    pub fn get_page_id(&self) {
-        self.page_id.load(Ordering::SeqCst);
+    pub fn get_page_id(&self) -> usize {
+        self.page_id.load(Ordering::SeqCst)
     }
 
     pub fn slot(&self, slot: usize) -> u64 {
@@ -102,7 +102,6 @@ impl BufferPool {
             if self.clock_refs[self.clock_hand]
                 || Arc::strong_count(&self.frames[self.clock_hand]) > 1
             {
-                println!("Cannot find evict victim");
                 self.clock_refs[self.clock_hand] = false;
                 self.clock_hand = (self.clock_hand + 1) % self.size;
                 continue;
@@ -125,13 +124,16 @@ impl BufferPool {
     }
 
     fn evict(&mut self, victim: usize) {
-        self.page_frame_map.remove(&victim);
-
         let frame = &self.frames[victim];
+
+        self.page_frame_map
+            .remove(&frame.page_id.load(Ordering::SeqCst));
 
         if frame.dirty.load(Ordering::SeqCst) {
             frame.flush(self.disk.borrow());
         }
+
+        frame.page_id.store(!0, Ordering::SeqCst);
     }
 
     pub fn new_page(&mut self) -> Arc<BufferPoolFrame> {
@@ -150,6 +152,9 @@ impl BufferPool {
     }
 
     pub fn get_page(&mut self, page_id: usize) -> Arc<BufferPoolFrame> {
+        if page_id == !0 {
+            panic!("Tried to load invalid page");
+        }
         if let Some(frame_id) = self.page_frame_map.get(&page_id) {
             self.clock_refs[*frame_id] = true;
             let frame = &self.frames[*frame_id];
@@ -174,7 +179,9 @@ impl BufferPool {
 
         drop(page);
 
-        self.page_frame_map.insert(page_id, victim);
+        self.page_frame_map
+            .try_insert(page_id, victim)
+            .expect("Tried to re-map existing page in bufferpool");
 
         frame
     }

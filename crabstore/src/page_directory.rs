@@ -52,7 +52,7 @@ impl PageDirectory {
 
         let mut entry = Arc::<[usize]>::new_uninit_slice(page_ids.len());
 
-        for (i, x) in page_ids.into_iter().enumerate() {
+        for (i, x) in page_ids.iter().enumerate() {
             Arc::get_mut(&mut entry).unwrap()[i]
                 .write(x.expect("Must provide all columns of page dir entry if new"));
         }
