@@ -1,7 +1,7 @@
 use std::{
     fs::*,
     io::{self, Write},
-    os::windows::prelude::FileExt,
+    os::unix::prelude::FileExt,
     path::Path,
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -42,9 +42,9 @@ impl DiskManager {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn read_page(&self, page_id: usize, block: &mut [u8; PAGE_SIZE]) {
+    pub fn read_page(&self, page_id: usize, page: &mut [u8; PAGE_SIZE]) {
         let file = self.file.lock();
-        file.read_exact_at(&mut page.page, (page_id * PAGE_SIZE) as u64)
+        file.read_exact_at(page, (page_id * PAGE_SIZE) as u64)
             .expect("Failed to read page");
     }
 
