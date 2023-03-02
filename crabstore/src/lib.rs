@@ -1,4 +1,5 @@
 #![feature(new_uninit)]
+#![feature(map_try_insert)]
 #![feature(get_mut_unchecked)]
 
 use core::fmt;

@@ -3,7 +3,7 @@ use std::{
     io::Read,
     sync::{
         atomic::{self, Ordering},
-        Mutex, RwLock, Arc,
+        Arc, Mutex, RwLock,
     },
 };
 
@@ -43,7 +43,8 @@ impl BufferPoolFrame {
     }
 
     pub fn write_slot(&self, slot: usize, value: u64) {
-        let page = self
+        self.mark_dirty();
+        let mut page = self
             .page
             .write()
             .expect("Couldn't lock physical page, poisoned?");
@@ -52,7 +53,7 @@ impl BufferPoolFrame {
 }
 
 pub struct BufferPool {
-    disk: DiskManager,
+    disk: Arc<DiskManager>,
     size: usize,
     page_frame_map: HashMap<usize, usize, BuildNoHashHasher<usize>>,
     frames: Vec<Arc<BufferPoolFrame>>,
@@ -61,13 +62,12 @@ pub struct BufferPool {
 }
 
 impl BufferPool {
-    pub fn new(disk: DiskManager, size: usize) -> Self {
+    pub fn new(disk: Arc<DiskManager>, size: usize) -> Self {
         let mut frames = Vec::with_capacity(size);
-        let mut page_frame_map =
-            HashMap::with_capacity_and_hasher(size, BuildNoHashHasher::default());
+        let page_frame_map = HashMap::with_capacity_and_hasher(size, BuildNoHashHasher::default());
         let mut clock_refs = Vec::with_capacity(size);
 
-        for i in 0..size {
+        for _ in 0..size {
             frames.push(Arc::new(BufferPoolFrame::new()));
             clock_refs.push(false);
         }
@@ -82,9 +82,11 @@ impl BufferPool {
         }
     }
 
-    fn find_evict_victim(&self) -> usize {
+    fn find_evict_victim(&mut self) -> usize {
         let victim = loop {
-            if self.clock_refs[self.clock_hand] || self.frames[self.clock_hand].strong_count() > 1 {
+            if self.clock_refs[self.clock_hand]
+                || Arc::strong_count(&self.frames[self.clock_hand]) > 1
+            {
                 self.clock_refs[self.clock_hand] = false;
                 self.clock_hand = (self.clock_hand + 1) % self.size;
                 continue;
@@ -98,7 +100,7 @@ impl BufferPool {
         victim
     }
 
-    fn evict(&self, victim: usize) {
+    fn evict(&mut self, victim: usize) {
         self.page_frame_map.remove(&victim);
 
         let frame = &self.frames[self.clock_hand];
@@ -127,7 +129,7 @@ impl BufferPool {
 
         self.evict(victim);
 
-        let frame = self.frames[victim];
+        let frame = Arc::clone(&self.frames[victim]);
 
         frame.page_id.store(new_page_id, Ordering::SeqCst);
         self.page_frame_map.insert(new_page_id, victim);
@@ -145,13 +147,13 @@ impl BufferPool {
 
         self.evict(victim);
 
-        let frame = self.frames[victim];
+        let frame = Arc::clone(&self.frames[victim]);
 
         frame.page_id.store(page_id, Ordering::SeqCst);
 
         self.clock_refs[victim] = true;
 
-        let page = frame
+        let mut page = frame
             .page
             .write()
             .expect("Failed to acquire RwLock, poisoned?");

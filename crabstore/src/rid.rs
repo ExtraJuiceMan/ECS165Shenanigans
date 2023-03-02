@@ -20,9 +20,9 @@ impl RID {
     */
     fn untail(&self) -> usize {
         if self.is_tail() {
-            !self.rid
+            !self.rid as usize
         } else {
-            self.rid
+            self.rid as usize
         }
     }
 

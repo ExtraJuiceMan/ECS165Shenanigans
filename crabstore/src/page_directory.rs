@@ -28,12 +28,8 @@ pub struct PageDirectory {
 }
 
 impl PageDirectory {
-    pub fn get(&self, rid: RID) -> Arc<[usize]> {
-        Arc::clone(
-            self.directory
-                .get(&rid.page())
-                .expect("Page requested from directory but it doesn't exist"),
-        )
+    pub fn get(&self, rid: RID) -> Option<Arc<[usize]>> {
+        self.directory.get(&rid.page()).map(|x| Arc::clone(x))
     }
 
     pub fn set(&mut self, rid: RID, page_ids: &[Option<usize>]) {
@@ -42,9 +38,9 @@ impl PageDirectory {
 
             for (i, potential_page) in page_ids.into_iter().enumerate() {
                 if let Some(new_page) = potential_page {
-                    cols_clone[i].write(*new_page);
+                    Arc::get_mut(&mut cols_clone).unwrap()[i].write(*new_page);
                 } else {
-                    cols_clone[i].write(current_vals[i]);
+                    Arc::get_mut(&mut cols_clone).unwrap()[i].write(current_vals[i]);
                 }
             }
 
@@ -54,14 +50,21 @@ impl PageDirectory {
             return;
         }
 
-        let entry = Arc::<[usize]>::new_uninit_slice(page_ids.len());
+        let mut entry = Arc::<[usize]>::new_uninit_slice(page_ids.len());
 
         for (i, x) in page_ids.into_iter().enumerate() {
-            entry[i].write(x.expect("Must provide all columns of page dir entry if new"));
+            Arc::get_mut(&mut entry).unwrap()[i]
+                .write(x.expect("Must provide all columns of page dir entry if new"));
         }
 
         self.directory
             .insert(rid.page(), unsafe { entry.assume_init() });
+    }
+
+    pub fn new_page(&mut self, page_num: usize, column_page_ids: Arc<[usize]>) {
+        self.directory
+            .try_insert(page_num, Arc::clone(&column_page_ids))
+            .expect("Tried to allocate new page with existing page number");
     }
 
     pub fn new(path: &Path) -> Self {

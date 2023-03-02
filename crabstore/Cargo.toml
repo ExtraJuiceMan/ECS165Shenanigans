@@ -1,6 +1,6 @@
 [package]
 name = "crabstore"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -10,11 +10,11 @@ crate-type = ["cdylib"]
 
 
 [dependencies]
-nohash = "0.2.0"
 pyo3 = { version = "0.18.0", features = ["extension-module", "abi3-py38"] }
 rayon  = {version = "1.6.1"}
 rkyv = { version = "0.7.40", features=["strict", "validation"]}
 parking_lot = "0.12.1"
+nohash = "0.2.0"
 
 [profile.release-with-debug]
 inherits = "release"

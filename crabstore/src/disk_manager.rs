@@ -29,8 +29,8 @@ impl DiskManager {
         })
     }
 
-    pub fn flush(&mut self) {
-        let file = self.file.lock();
+    pub fn flush(&self) {
+        let mut file = self.file.lock();
         file.flush().expect("Failed to flush file to disk");
     }
 
@@ -62,11 +62,11 @@ impl DiskManager {
             .expect("Failed to write page");
     }
 
-    pub fn reserve_page(&mut self) -> usize {
+    pub fn reserve_page(&self) -> usize {
         self.next_free_page.fetch_add(1, Ordering::SeqCst)
     }
 
-    pub fn reserve_range(&mut self, pages: usize) -> usize {
+    pub fn reserve_range(&self, pages: usize) -> usize {
         self.next_free_page.fetch_add(pages, Ordering::SeqCst)
     }
 
