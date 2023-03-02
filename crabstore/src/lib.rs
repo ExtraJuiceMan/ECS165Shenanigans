@@ -133,6 +133,9 @@ impl CrabStore {
         num_columns: usize,
         key_index: usize,
     ) -> Py<Table> {
+        if(self.directory.is_none()){
+            self.open(String::from("./tmp"));
+        }
         Python::with_gil(|py| -> Py<Table> {
             let table: Py<Table> = Py::new(
                 py,
