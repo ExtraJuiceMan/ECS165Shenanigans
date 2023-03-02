@@ -177,7 +177,7 @@ impl Table {
         let column_pages = unsafe { column_pages.assume_init() };
         let mut page_dir = self.page_dir.write();
 
-        page_dir.new_page(next_tid.page(), column_pages);
+        page_dir.new_page(next_tid.page(), Arc::clone(&column_pages));
 
         drop(page_dir);
 
@@ -185,6 +185,7 @@ impl Table {
     }
 
     fn get_page(&self, rid: RID) -> Page {
+        if rid.is_tail() && rid.page() < !0 - 3 {}
         Page::new(self.page_dir.read().get(rid).expect("Page get fail"))
     }
 

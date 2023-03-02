@@ -109,6 +109,7 @@ impl BufferPool {
 
             break self.clock_hand;
         };
+
         self.clock_hand = (self.clock_hand + 1) % self.size;
 
         victim
@@ -131,6 +132,7 @@ impl BufferPool {
 
         if frame.dirty.load(Ordering::SeqCst) {
             frame.flush(self.disk.borrow());
+            println!("Flushing toilet for {}", frame.get_page_id());
         }
 
         frame.page_id.store(!0, Ordering::SeqCst);

@@ -11,16 +11,16 @@ impl RID {
     /*
         MSB set, then tail since tail grows downwards from 64 bit max
     */
-    fn is_tail(&self) -> bool {
+    pub fn is_tail(&self) -> bool {
         self.rid >> (usize::BITS - 1) & 1 != 0
     }
 
     /*
        "Untail" the page if it is a tail by inverting the bits to create readable numbers
     */
-    fn untail(&self) -> usize {
+    pub fn untail(&self) -> usize {
         if self.is_tail() {
-            !self.rid as usize
+            (!self.rid - 1) as usize
         } else {
             self.rid as usize
         }

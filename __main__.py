@@ -90,7 +90,7 @@ def validate():
 				print('select error on non-primary key', update_column, 'and', updated_columns, ':', record, ', correct:', records[key])
 			else:
 				pass
-				# print('update on', original, 'and', updated_columns, ':', record)
+			#	print('update on', original, 'and', updated_columns, ':', record)
 			updated_columns[i] = None
 	print("Update finished.")
 	keys = sorted(list(records.keys()))
