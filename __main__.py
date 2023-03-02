@@ -7,8 +7,11 @@ from lstore.db import Database
 from lstore.query import Query
 
 from random import choice, randint, sample, seed
+from shutil import rmtree
+
 def validate():
 	db = Database()
+	rmtree('./meme')
 	db.open('./meme')
 	# Create a table  with 5 columns
 	#   Student Id and 4 grades
@@ -39,8 +42,6 @@ def validate():
 		query.insert(*records[key])
 		# print('inserted', records[key])
 	print("Insert finished")
-	db.close()
-	exit()
 
 	# Check inserted records using select query
 	for key in records:

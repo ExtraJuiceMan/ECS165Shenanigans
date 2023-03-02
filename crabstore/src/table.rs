@@ -73,7 +73,6 @@ impl Table {
 
         let page_dir = RwLock::new(PageDirectory::load(pd_file));
         let range_dir: RwLock<Vec<PageRange>> = RwLock::new(Vec::new());
-
         let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), 128));
 
         Table {
@@ -166,17 +165,20 @@ impl Table {
             .next_tid
             .fetch_sub(PAGE_SLOTS as u64, Ordering::SeqCst)
             .into();
-        let tail_reserve_start = self.disk.reserve_range(self.total_columns());
 
+        let tail_reserve_start = self.disk.reserve_range(self.total_columns());
         let mut column_pages = Arc::<[usize]>::new_uninit_slice(self.total_columns());
+
         for (i, x) in (tail_reserve_start..(tail_reserve_start + self.total_columns())).enumerate()
         {
             Arc::get_mut(&mut column_pages).unwrap()[i].write(x);
         }
-        let column_pages = unsafe { column_pages.assume_init() };
 
+        let column_pages = unsafe { column_pages.assume_init() };
         let mut page_dir = self.page_dir.write();
+
         page_dir.new_page(next_tid.page(), column_pages);
+        
         drop(page_dir);
 
         PageRange::new(next_tid.raw(), next_tid.page())
