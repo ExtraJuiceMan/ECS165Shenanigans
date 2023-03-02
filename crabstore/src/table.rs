@@ -53,7 +53,7 @@ pub struct Table {
 }
 
 impl Table {
-    pub fn load(name: &str, db_file: &Path, pd_file: &Path) -> Self {
+    pub fn load(name: &str, db_file: &Path, pd_file: &Path, id_file: &Path) -> Self {
         let disk = Arc::new(DiskManager::new(db_file).expect("Failed to open table file"));
 
         let mut page = PhysicalPage::default();
@@ -67,13 +67,11 @@ impl Table {
             .expect("Failed to deserialize table header")
         };
 
-        let mut index = Index::new(header.primary_key_index, header.num_columns);
-
-        index.create_indexes_from_bit_vector(header.indexed_columns);
+        let index = Index::load(id_file);
 
         let page_dir = RwLock::new(PageDirectory::load(pd_file));
         let range_dir: RwLock<Vec<PageRange>> = RwLock::new(Vec::with_capacity(3));
-        let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), 128));
+        let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), 16));
 
         Table {
             name: name.into(),
@@ -113,6 +111,8 @@ impl Table {
 
         let mut page_dir = self.page_dir.write();
         page_dir.persist();
+
+        self.index.persist();
     }
 
     /*
@@ -216,6 +216,8 @@ impl Table {
                         rid = rid.next();
                         continue;
                     }
+
+                    drop(page);
 
                     let latest_rid = self.get_latest(rid);
                     let latest_page = self.get_page(latest_rid);
@@ -376,6 +378,7 @@ impl Table {
         key_index: usize,
         db_file: String,
         pd_file: String,
+        id_file: String,
     ) -> Table {
         let page_dir = RwLock::new(PageDirectory::new(Path::new(&pd_file)));
         let range_dir: RwLock<Vec<PageRange>> = RwLock::new(Vec::new());
@@ -387,7 +390,7 @@ impl Table {
             name,
             num_columns,
             primary_key_index: key_index,
-            index: Index::new(key_index, num_columns),
+            index: Index::new(key_index, num_columns, Path::new(&id_file)),
             next_rid: 0.into(),
             next_tid: (!0 - 1).into(),
             page_dir,
@@ -634,13 +637,6 @@ impl Table {
                         }
 
                         let column_pages = unsafe { column_pages.assume_init() };
-
-                        println!(
-                            "Allocating for RID {} PR: {} R: {} PID: {page_id}",
-                            rid.raw(),
-                            rid.page_range(),
-                            rid.page()
-                        );
 
                         page_dir.new_page(page_id, column_pages);
                     }

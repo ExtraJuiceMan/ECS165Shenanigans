@@ -1,16 +1,27 @@
 use crate::rid::RID;
 use core::fmt;
 use pyo3::prelude::*;
-use std::ops::Bound::Included;
+use rkyv::{
+    de::deserializers::SharedDeserializeMap,
+    ser::{
+        serializers::{AllocScratch, CompositeSerializer, SharedSerializeMap, WriteSerializer},
+        Serializer,
+    },
+    Deserialize,
+};
 use std::{
     collections::BTreeMap,
+    io::{BufWriter, Read, Write},
     ops::{Bound, RangeInclusive},
+    path::PathBuf,
 };
+use std::{fs::File, ops::Bound::Included, path::Path};
 
 #[derive(Clone, Debug, Default)]
 #[pyclass(subclass)]
 //change to BTreeMap when we need to implement ranges
 pub struct Index {
+    path: PathBuf,
     indices: Vec<Option<BTreeMap<u64, Vec<RID>>>>,
 }
 impl fmt::Display for Index {
@@ -34,12 +45,61 @@ impl fmt::Display for Index {
 }
 
 impl Index {
-    pub fn new(key_index: usize, num_columns: usize) -> Self {
+    pub fn new(key_index: usize, num_columns: usize, path: &Path) -> Self {
         let mut indices = Vec::with_capacity(num_columns);
         indices.resize_with(num_columns, Default::default);
         indices[key_index] = Some(BTreeMap::new());
 
-        Index { indices }
+        Index {
+            path: path.into(),
+            indices,
+        }
+    }
+
+    pub fn load(path: &Path) -> Self {
+        let mut id_file = File::options()
+            .read(true)
+            .open(path)
+            .expect("Unable to open index file");
+
+        let mut id_bytes = Vec::new();
+
+        id_file
+            .read_to_end(&mut id_bytes)
+            .expect("Unable to read index file");
+
+        let archived =
+            unsafe { rkyv::archived_root::<Vec<Option<BTreeMap<u64, Vec<RID>>>>>(&id_bytes) };
+
+        Index {
+            path: path.into(),
+            indices: archived
+                .deserialize(&mut SharedDeserializeMap::new())
+                .expect("Failed to deserialize page directory"),
+        }
+    }
+
+    pub fn persist(&self) {
+        let id_file = File::options()
+            .write(true)
+            .truncate(true)
+            .create(true)
+            .open(&self.path)
+            .expect("Unable to open index file");
+
+        let mut serializer = CompositeSerializer::new(
+            WriteSerializer::new(BufWriter::new(id_file)),
+            AllocScratch::default(),
+            SharedSerializeMap::new(),
+        );
+
+        serializer
+            .serialize_value(&self.indices)
+            .expect("Unable to serialize indexes");
+
+        let (buf, _, _) = serializer.into_components();
+
+        buf.into_inner().flush().expect("Failed to flush indices");
     }
 
     pub fn index_meta_to_bit_vector(&self) -> usize {

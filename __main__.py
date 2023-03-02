@@ -61,7 +61,7 @@ def validate():
 			# print('select on', key, ':', record)
 	print("Select finished.")
 	
-	input()
+	#input()
 	update_time_0 = perf_counter()
 	for key in records:
 		updated_columns = [None, None, None, None, None]
@@ -122,6 +122,7 @@ def validate():
 			print('delete error on ', key)
 	
 	print("Delete finished.")
+	db.close()
 
 def benchmark():
 	db = Database()

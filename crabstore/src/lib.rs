@@ -115,6 +115,13 @@ impl CrabStore {
 
         self.directory.as_ref().unwrap().join(Path::new(&pd_file))
     }
+
+    pub fn index_filename(&self, table: &str) -> PathBuf {
+        let mut id_file = table.to_string();
+        id_file.push_str("_id.CRAB");
+
+        self.directory.as_ref().unwrap().join(Path::new(&id_file))
+    }
 }
 
 #[pymethods]
@@ -133,7 +140,7 @@ impl CrabStore {
         num_columns: usize,
         key_index: usize,
     ) -> Py<Table> {
-        if(self.directory.is_none()){
+        if (self.directory.is_none()) {
             self.open(String::from("./tmp"));
         }
         Python::with_gil(|py| -> Py<Table> {
@@ -148,6 +155,10 @@ impl CrabStore {
                         .unwrap()
                         .to_string(),
                     self.page_dir_filename(name.as_str())
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                    self.index_filename(name.as_str())
                         .to_str()
                         .unwrap()
                         .to_string(),
@@ -203,6 +214,7 @@ impl CrabStore {
                             name,
                             &self.table_filename(name.as_ref()),
                             &self.page_dir_filename(name.as_ref()),
+                            &self.index_filename(name.as_ref()),
                         ),
                     )
                     .unwrap(),

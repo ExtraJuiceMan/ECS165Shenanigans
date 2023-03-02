@@ -1,8 +1,10 @@
 use std::mem::size_of;
 
-use crate::{PAGE_RANGE_SIZE, PAGE_RANGE_COUNT};
+use rkyv::{Archive, Serialize, Deserialize};
 
-#[derive(Clone, Copy, Debug, Default)]
+use crate::{PAGE_RANGE_COUNT, PAGE_RANGE_SIZE};
+
+#[derive(Archive, Serialize, Deserialize, Clone, Copy, Debug, Default)]
 pub struct RID {
     rid: u64,
 }
