@@ -110,6 +110,8 @@ impl Table {
         self.disk.write_page(0, &page);
         self.disk.flush();
 
+        self.bufferpool.lock().flush_all();
+
         let mut page_dir = self.page_dir.write();
         page_dir.persist();
     }
@@ -417,7 +419,6 @@ impl Table {
 
         Python::with_gil(|py| -> Py<PyList> {
             let selected_records: Py<PyList> = PyList::empty(py).into();
-            let mut page: Option<&Page>;
 
             for rid in vals {
                 let result_cols = PyList::empty(py);
@@ -605,18 +606,15 @@ impl Table {
     #[args(values = "*")]
     pub fn insert(&mut self, values: &PyTuple) {
         let rid: RID = self.next_rid.fetch_add(1, Ordering::SeqCst).into();
-        let page_range = rid.page_range();
-        let slot = rid.slot();
 
         let page_dir = self.page_dir.read();
-        let page: Arc<[usize]>;
 
-        match page_dir.get(rid) {
+        let page: Arc<[usize]> = match page_dir.get(rid) {
             None => {
                 drop(page_dir);
                 let mut page_dir = self.page_dir.write();
                 // Check again since unlocking read and acquiring write are not atomic
-                if let None = page_dir.get(rid) {
+                if page_dir.get(rid).is_none() {
                     let reserve_count = self.total_columns() * PAGE_RANGE_SIZE;
                     let reserved = self.disk.reserve_range(reserve_count);
 
@@ -638,12 +636,13 @@ impl Table {
                         page_dir.new_page(page_id, column_pages);
                     }
                 }
-                page = page_dir
+
+                page_dir
                     .get(rid)
-                    .expect("Allocated new pages but no mapping in directory");
+                    .expect("Allocated new pages but no mapping in directory")
             }
-            Some(cols) => page = cols,
-        }
+            Some(cols) => cols,
+        };
 
         let page = Page::new(page);
 

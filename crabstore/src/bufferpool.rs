@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     collections::{HashMap, VecDeque},
     io::Read,
     sync::{
@@ -24,6 +25,20 @@ impl BufferPoolFrame {
             dirty: false.into(),
             page: RwLock::new(PhysicalPage::default()),
         }
+    }
+
+    pub fn flush(&self, disk: &DiskManager) {
+        let page = self
+            .page
+            .write()
+            .expect("Failed to acquire lock, lock poisoning?");
+
+        disk.write_page(self.page_id.load(Ordering::SeqCst), &page.page);
+
+        disk.flush();
+
+        self.dirty.store(false, Ordering::SeqCst);
+        self.page_id.store(!0, Ordering::SeqCst);
     }
 
     pub fn mark_dirty(&self) {
@@ -87,6 +102,7 @@ impl BufferPool {
             if self.clock_refs[self.clock_hand]
                 || Arc::strong_count(&self.frames[self.clock_hand]) > 1
             {
+                println!("Cannot find evict victim");
                 self.clock_refs[self.clock_hand] = false;
                 self.clock_hand = (self.clock_hand + 1) % self.size;
                 continue;
@@ -94,31 +110,27 @@ impl BufferPool {
 
             break self.clock_hand;
         };
-
         self.clock_hand = (self.clock_hand + 1) % self.size;
 
         victim
     }
 
+    pub fn flush_all(&mut self) {
+        for i in 0..self.size {
+            if self.frames[i].dirty.load(Ordering::SeqCst) {
+                self.frames[i].flush(self.disk.borrow());
+            }
+        }
+        self.disk.flush();
+    }
+
     fn evict(&mut self, victim: usize) {
         self.page_frame_map.remove(&victim);
 
-        let frame = &self.frames[self.clock_hand];
-
-        frame.page_id.store(!0, Ordering::SeqCst);
+        let frame = &self.frames[victim];
 
         if frame.dirty.load(Ordering::SeqCst) {
-            let page = frame
-                .page
-                .write()
-                .expect("Failed to acquire lock, lock poisoning?");
-
-            self.disk
-                .write_page(frame.page_id.load(Ordering::SeqCst), &page.page);
-
-            self.disk.flush();
-
-            frame.dirty.store(false, Ordering::SeqCst);
+            frame.flush(self.disk.borrow());
         }
     }
 
@@ -134,24 +146,22 @@ impl BufferPool {
         frame.page_id.store(new_page_id, Ordering::SeqCst);
         self.page_frame_map.insert(new_page_id, victim);
 
-        Arc::clone(&frame)
+        frame
     }
 
     pub fn get_page(&mut self, page_id: usize) -> Arc<BufferPoolFrame> {
         if let Some(frame_id) = self.page_frame_map.get(&page_id) {
             self.clock_refs[*frame_id] = true;
-            return Arc::clone(&self.frames[*frame_id]);
+            let frame = &self.frames[*frame_id];
+            return Arc::clone(frame);
         }
 
         let victim = self.find_evict_victim();
-
         self.evict(victim);
 
         let frame = Arc::clone(&self.frames[victim]);
 
         frame.page_id.store(page_id, Ordering::SeqCst);
-
-        self.clock_refs[victim] = true;
 
         let mut page = frame
             .page
@@ -160,10 +170,12 @@ impl BufferPool {
 
         self.disk.read_page(page_id, &mut page.page);
 
+        self.clock_refs[victim] = true;
+
         drop(page);
 
         self.page_frame_map.insert(page_id, victim);
 
-        Arc::clone(&frame)
+        frame
     }
 }

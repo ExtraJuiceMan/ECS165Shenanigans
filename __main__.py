@@ -39,6 +39,8 @@ def validate():
 		query.insert(*records[key])
 		# print('inserted', records[key])
 	print("Insert finished")
+	db.close()
+	exit()
 
 	# Check inserted records using select query
 	for key in records:
