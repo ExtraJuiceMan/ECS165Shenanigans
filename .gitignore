@@ -5,3 +5,6 @@
 __pycache__
 target
 valgrind-python.supp
+crabstore/meme/crab_dt.CRAB
+crabstore/meme/Grades_db.CRAB
+crabstore/meme/Grades_pd.CRAB

@@ -328,10 +328,6 @@ impl Table {
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
             .slot(rid.slot());
 
-        if (rid.raw() == 0) {
-            println!("Latest for 0: {}", indir);
-        }
-
         if indir == RID_INVALID {
             rid
         } else {
@@ -339,7 +335,7 @@ impl Table {
         }
     }
 
-    pub fn merge_values(&self, base_rid: RID, columns: &Vec<Option<u64>>) -> Vec<u64> {
+    pub fn merge_values(&self, base_rid: RID, columns: &[Option<u64>]) -> Vec<u64> {
         let rid = self.get_latest(base_rid);
         let page = self.get_page(rid);
 
@@ -489,25 +485,21 @@ impl Table {
         let base_page = self.get_page(base_rid);
         let updated_values = self.merge_values(base_rid, &vals);
 
-        let indirection_column_rid = match base_page
+        let old_latest_rid = self.get_latest(base_rid);
+
+        let old_schema_encoding = base_page
             .get_column(
                 self.bufferpool.lock().borrow_mut(),
                 METADATA_SCHEMA_ENCODING,
             )
-            .slot(base_rid.slot())
-        {
-            0 => base_rid.raw(),
-            _ => base_page
-                .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
-                .slot(base_rid.slot()),
-        };
+            .slot(base_rid.slot());
 
         let tail_rid = self.next_tid(base_rid.page_range());
         let tail_page = self.get_page(tail_rid);
 
         tail_page
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
-            .write_slot(tail_rid.slot(), indirection_column_rid);
+            .write_slot(tail_rid.slot(), old_latest_rid.raw());
 
         tail_page
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
@@ -526,14 +518,6 @@ impl Table {
             //print!("Base Page: {:?}\n",&base_page.get_column(crate::NUM_METADATA_COLUMNS + i).page[0..50],);
             //print!("Tail Page: {:?}\n",&page.get_column(crate::NUM_METADATA_COLUMNS + i).page[0..50]);
         }
-
-        let old_latest_rid = self.get_latest(base_rid);
-        let old_schema_encoding = base_page
-            .get_column(
-                self.bufferpool.lock().borrow_mut(),
-                METADATA_SCHEMA_ENCODING,
-            )
-            .slot(base_rid.slot());
 
         let mut schema_encoding: u64 = 0;
 
@@ -658,12 +642,6 @@ impl Table {
             }
             Some(cols) => cols,
         };
-
-        if (rid.raw() == 0) {
-            for x in page.iter() {
-                println!("Page Col: {x}");
-            }
-        }
 
         let page = Page::new(page);
 

@@ -11,7 +11,6 @@ from shutil import rmtree
 
 def validate():
 	db = Database()
-	rmtree('./meme')
 	db.open('./meme')
 	# Create a table  with 5 columns
 	#   Student Id and 4 grades
@@ -62,7 +61,6 @@ def validate():
 			# print('select on', key, ':', record)
 	print("Select finished.")
 	
-	exit()
 	for key in records:
 		updated_columns = [None, None, None, None, None]
 		for i in range(2, grades_table.num_columns):
