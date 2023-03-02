@@ -30,6 +30,7 @@ pub struct PageDirectory {
 }
 
 impl PageDirectory {
+    #[inline(always)]
     pub fn get(&self, rid: RID) -> Option<Arc<[usize]>> {
         self.directory.get(&rid.page()).map(Arc::clone)
     }

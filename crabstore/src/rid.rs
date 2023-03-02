@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use crate::PAGE_RANGE_SIZE;
+use crate::{PAGE_RANGE_SIZE, PAGE_RANGE_COUNT};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RID {
@@ -42,7 +42,7 @@ impl RID {
     }
 
     pub fn page_range(&self) -> usize {
-        self.page() / PAGE_RANGE_SIZE
+        self.page() / PAGE_RANGE_COUNT
     }
 
     pub fn raw(&self) -> u64 {

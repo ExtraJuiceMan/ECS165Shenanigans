@@ -51,6 +51,7 @@ pub struct Page {
 }
 
 impl Page {
+    #[inline(always)]
     pub fn new(column_pages: Arc<[usize]>) -> Self {
         Page { column_pages }
     }
@@ -61,14 +62,17 @@ impl Page {
         }
     }
 
+    #[inline(always)]
     pub fn get_column(&self, bp: &mut BufferPool, index: usize) -> Arc<BufferPoolFrame> {
         bp.get_page(self.column_pages[index])
     }
 
+    #[inline(always)]
     pub fn slot(&self, bp: &mut BufferPool, column: usize, rid: RID) -> u64 {
         self.get_column(bp, column).slot(rid.slot())
     }
 
+    #[inline(always)]
     pub fn write_slot(&mut self, bp: &mut BufferPool, column: usize, rid: RID, value: u64) {
         self.get_column(bp, column).write_slot(rid.slot(), value);
     }

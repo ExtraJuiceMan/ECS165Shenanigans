@@ -61,7 +61,8 @@ def validate():
 			# print('select on', key, ':', record)
 	print("Select finished.")
 	
-	#input()
+	input()
+	update_time_0 = perf_counter()
 	for key in records:
 		updated_columns = [None, None, None, None, None]
 		for i in range(2, grades_table.num_columns):
@@ -93,6 +94,8 @@ def validate():
 				pass
 			#	print('update on', original, 'and', updated_columns, ':', record)
 			updated_columns[i] = None
+	update_time_1 = perf_counter()
+	print("Updating 10k records took:  \t\t\t", update_time_1 - update_time_0)
 	print("Update finished.")
 	keys = sorted(list(records.keys()))
 	# aggregate on every column 
@@ -122,6 +125,7 @@ def validate():
 
 def benchmark():
 	db = Database()
+	db.open('./meme')
 	grades_table = db.create_table('Grades', 5, 0)
 	query = Query(grades_table)
 	keys = []
@@ -133,6 +137,12 @@ def benchmark():
 	insert_time_1 = perf_counter()
 
 	print("Inserting 10k records took:  \t\t\t", insert_time_1 - insert_time_0)
+	
+	select_time_0 = perf_counter()
+	for i in range(0, 10000):
+		query.select(choice(keys), 0, [1, 1, 1, 1, 1])
+	select_time_1 = perf_counter()
+	print("Selecting 10k records took:  \t\t\t", select_time_1 - select_time_0)
 
 	update_cols = [
     [None, None, None, None, None],

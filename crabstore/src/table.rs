@@ -184,8 +184,8 @@ impl Table {
         PageRange::new(next_tid.raw(), next_tid.page())
     }
 
+    #[inline(always)]
     fn get_page(&self, rid: RID) -> Page {
-        if rid.is_tail() && rid.page() < !0 - 3 {}
         Page::new(self.page_dir.read().get(rid).expect("Page get fail"))
     }
 
@@ -316,6 +316,7 @@ impl Table {
         }
     }
 
+    #[inline(always)]
     pub fn is_latest(&self, rid: RID) -> bool {
         self.get_page(rid)
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
@@ -323,6 +324,7 @@ impl Table {
             == RID_INVALID
     }
 
+    #[inline(always)]
     pub fn get_latest(&self, rid: RID) -> RID {
         let indir = self
             .get_page(rid)
@@ -632,6 +634,13 @@ impl Table {
                         }
 
                         let column_pages = unsafe { column_pages.assume_init() };
+
+                        println!(
+                            "Allocating for RID {} PR: {} R: {} PID: {page_id}",
+                            rid.raw(),
+                            rid.page_range(),
+                            rid.page()
+                        );
 
                         page_dir.new_page(page_id, column_pages);
                     }
