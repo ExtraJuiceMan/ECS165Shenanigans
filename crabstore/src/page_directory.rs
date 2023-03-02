@@ -2,6 +2,7 @@ use std::{
     borrow::Borrow,
     collections::HashMap,
     fs::File,
+    hash::{BuildHasher, BuildHasherDefault},
     io::{BufReader, BufWriter, Read, Write},
     ops::RangeBounds,
     path::{Path, PathBuf},
@@ -10,8 +11,8 @@ use std::{
     sync::Arc,
 };
 
-use nohash::BuildNoHashHasher;
 use rkyv::{
+    collections::ArchivedHashMap,
     de::{deserializers::SharedDeserializeMap, SharedDeserializeRegistry},
     ser::{
         serializers::{AllocScratch, CompositeSerializer, SharedSerializeMap, WriteSerializer},
@@ -19,12 +20,13 @@ use rkyv::{
     },
     Archive, Deserialize, Serialize,
 };
+use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::rid::RID;
 
 pub struct PageDirectory {
     path: PathBuf,
-    directory: HashMap<usize, Arc<[usize]>, BuildNoHashHasher<usize>>,
+    directory: FxHashMap<usize, Arc<[usize]>>,
 }
 
 impl PageDirectory {
@@ -74,7 +76,10 @@ impl PageDirectory {
 
         PageDirectory {
             path: path.into(),
-            directory: HashMap::with_hasher(BuildNoHashHasher::default()),
+            directory: FxHashMap::with_capacity_and_hasher(
+                80000,
+                BuildHasherDefault::<FxHasher>::default(),
+            ),
         }
     }
 
@@ -90,9 +95,7 @@ impl PageDirectory {
             .read_to_end(&mut pd_bytes)
             .expect("Unable to read page directory file");
 
-        let archived = unsafe {
-            rkyv::archived_root::<HashMap<usize, Arc<[usize]>, BuildNoHashHasher<usize>>>(&pd_bytes)
-        };
+        let archived = unsafe { rkyv::archived_root::<FxHashMap<usize, Arc<[usize]>>>(&pd_bytes) };
 
         PageDirectory {
             path: path.into(),

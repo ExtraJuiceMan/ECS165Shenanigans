@@ -72,7 +72,7 @@ impl Table {
         index.create_indexes_from_bit_vector(header.indexed_columns);
 
         let page_dir = RwLock::new(PageDirectory::load(pd_file));
-        let range_dir: RwLock<Vec<PageRange>> = RwLock::new(Vec::new());
+        let range_dir: RwLock<Vec<PageRange>> = RwLock::new(Vec::with_capacity(3));
         let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), 128));
 
         Table {

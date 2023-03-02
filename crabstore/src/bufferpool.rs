@@ -2,6 +2,7 @@ use std::{
     backtrace::Backtrace,
     borrow::Borrow,
     collections::{HashMap, VecDeque},
+    hash::BuildHasherDefault,
     io::Read,
     sync::{
         atomic::{self, Ordering},
@@ -9,7 +10,7 @@ use std::{
     },
 };
 
-use nohash::BuildNoHashHasher;
+use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::{disk_manager::DiskManager, page::PhysicalPage};
 
@@ -70,7 +71,7 @@ impl BufferPoolFrame {
 pub struct BufferPool {
     disk: Arc<DiskManager>,
     size: usize,
-    page_frame_map: HashMap<usize, usize, BuildNoHashHasher<usize>>,
+    page_frame_map: FxHashMap<usize, usize>,
     frames: Vec<Arc<BufferPoolFrame>>,
     clock_refs: Vec<bool>,
     clock_hand: usize,
@@ -79,7 +80,8 @@ pub struct BufferPool {
 impl BufferPool {
     pub fn new(disk: Arc<DiskManager>, size: usize) -> Self {
         let mut frames = Vec::with_capacity(size);
-        let page_frame_map = HashMap::with_capacity_and_hasher(size, BuildNoHashHasher::default());
+        let page_frame_map =
+            FxHashMap::with_capacity_and_hasher(size, BuildHasherDefault::<FxHasher>::default());
         let mut clock_refs = Vec::with_capacity(size);
 
         for _ in 0..size {

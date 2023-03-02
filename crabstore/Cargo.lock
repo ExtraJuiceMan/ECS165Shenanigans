@@ -56,11 +56,11 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 name = "crabstore"
 version = "0.2.0"
 dependencies = [
- "nohash",
  "parking_lot",
  "pyo3",
  "rayon",
  "rkyv",
+ "rustc-hash",
 ]
 
 [[package]]
@@ -180,12 +180,6 @@ checksum = "d61c719bcfbcf5d62b3a09efa6088de8c54bc0bfcd3ea7ae39fcc186108b8de1"
 dependencies = [
  "autocfg",
 ]
-
-[[package]]
-name = "nohash"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0f889fb66f7acdf83442c35775764b51fed3c606ab9cee51500dbde2cf528ca"
 
 [[package]]
 name = "num_cpus"
@@ -388,6 +382,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "rustc-hash"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "scopeguard"
