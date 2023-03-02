@@ -60,13 +60,11 @@ impl Page {
     }
 
     pub fn slot(&self, bp: &mut BufferPool, column: usize, rid: RID) -> u64 {
-        self.get_column(bp, self.column_pages[column])
-            .slot(rid.slot())
+        self.get_column(bp, column).slot(rid.slot())
     }
 
     pub fn write_slot(&mut self, bp: &mut BufferPool, column: usize, rid: RID, value: u64) {
-        self.get_column(bp, self.column_pages[column])
-            .write_slot(rid.slot(), value);
+        self.get_column(bp, column).write_slot(rid.slot(), value);
     }
 }
 

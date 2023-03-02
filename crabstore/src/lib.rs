@@ -60,9 +60,9 @@ impl Record {
     #[new]
     pub fn new(rid: u64, indirection: u64, schema_encoding: u64, columns: Py<PyList>) -> Self {
         Record {
-            rid: 0,
-            indirection: 0,
-            schema_encoding: 0,
+            rid,
+            indirection,
+            schema_encoding,
             columns,
         }
     }

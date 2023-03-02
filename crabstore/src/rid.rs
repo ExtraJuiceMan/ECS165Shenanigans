@@ -38,7 +38,7 @@ impl RID {
        pages are virtually mapped by our directory anyway
     */
     pub fn page(&self) -> usize {
-        ((self.rid >> 9) & 0b1111) as usize
+        (self.rid >> 9) as usize
     }
 
     pub fn page_range(&self) -> usize {

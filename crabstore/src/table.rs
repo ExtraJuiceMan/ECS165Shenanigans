@@ -178,7 +178,7 @@ impl Table {
         let mut page_dir = self.page_dir.write();
 
         page_dir.new_page(next_tid.page(), column_pages);
-        
+
         drop(page_dir);
 
         PageRange::new(next_tid.raw(), next_tid.page())
@@ -272,7 +272,7 @@ impl Table {
                             self.bufferpool.lock().borrow_mut(),
                             NUM_METADATA_COLUMNS + column_index,
                         )
-                        .slot(rid.slot())
+                        .slot(latest_rid.slot())
                         == value
                     {
                         rids.push(rid);
@@ -342,7 +342,7 @@ impl Table {
         columns
             .iter()
             .zip(
-                (NUM_METADATA_COLUMNS..self.num_columns + NUM_METADATA_COLUMNS).map(|column| {
+                (NUM_METADATA_COLUMNS..(self.num_columns + NUM_METADATA_COLUMNS)).map(|column| {
                     page.get_column(self.bufferpool.lock().borrow_mut(), column)
                         .slot(rid.slot())
                 }),
@@ -437,20 +437,24 @@ impl Table {
                     );
                 }
 
+                let original_rid = page
+                    .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
+                    .slot(rid.slot());
+
+                let indirection = page
+                    .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
+                    .slot(rid.slot());
+
+                let schema = page
+                    .get_column(
+                        self.bufferpool.lock().borrow_mut(),
+                        METADATA_SCHEMA_ENCODING,
+                    )
+                    .slot(rid.slot());
+
                 let record = PyCell::new(
                     py,
-                    Record::new(
-                        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
-                            .slot(rid.slot()) as u64,
-                        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
-                            .slot(rid.slot()) as u64,
-                        page.get_column(
-                            self.bufferpool.lock().borrow_mut(),
-                            METADATA_SCHEMA_ENCODING,
-                        )
-                        .slot(rid.slot()) as u64,
-                        result_cols.into(),
-                    ),
+                    Record::new(original_rid, indirection, schema, result_cols.into()),
                 )
                 .unwrap();
 
@@ -650,6 +654,9 @@ impl Table {
 
         page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
             .write_slot(rid.slot(), rid.raw());
+
+        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
+            .write_slot(rid.slot(), RID_INVALID);
 
         page.get_column(
             self.bufferpool.lock().borrow_mut(),

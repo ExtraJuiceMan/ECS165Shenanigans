@@ -29,7 +29,7 @@ pub struct PageDirectory {
 
 impl PageDirectory {
     pub fn get(&self, rid: RID) -> Option<Arc<[usize]>> {
-        self.directory.get(&rid.page()).map(|x| Arc::clone(x))
+        self.directory.get(&rid.page()).map(Arc::clone)
     }
 
     pub fn set(&mut self, rid: RID, page_ids: &[Option<usize>]) {
