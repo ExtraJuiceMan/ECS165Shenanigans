@@ -12,7 +12,7 @@ impl RID {
         MSB set, then tail since tail grows downwards from 64 bit max
     */
     fn is_tail(&self) -> bool {
-        self.rid & (1 << (size_of::<usize>() * 8)) != 0
+        self.rid >> (usize::BITS - 1) & 1 != 0
     }
 
     /*
@@ -30,7 +30,7 @@ impl RID {
         We untail because we want the offset from the start of the page
     */
     pub fn slot(&self) -> usize {
-        (self.untail() & 0b111111111) as usize
+        self.untail() & 0b111111111
     }
 
     /*
