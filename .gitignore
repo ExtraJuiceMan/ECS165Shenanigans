@@ -11,3 +11,6 @@ crabstore/meme/Grades_pd.CRAB
 test/crab_dt.CRAB
 .gitignore
 test/Grades_pd.CRAB
+meme/crab_dt.CRAB
+meme/Grades_db.CRAB
+meme/Grades_pd.CRAB
