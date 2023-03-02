@@ -1,10 +1,15 @@
 use std::{
     fs::*,
     io::{self, Write},
-    os::windows::prelude::FileExt,
     path::Path,
     sync::atomic::{AtomicUsize, Ordering},
 };
+
+#[cfg(target_os = "linux")]
+use std::os::unix::prelude::FileExt;
+
+#[cfg(target_os = "windows")]
+use std::os::windows::prelude::FileExt;
 
 use parking_lot::Mutex;
 
