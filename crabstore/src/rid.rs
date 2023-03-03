@@ -22,7 +22,7 @@ impl RID {
     */
     pub fn untail(&self) -> usize {
         if self.is_tail() {
-            (!self.rid - 1) as usize
+            (!(self.rid + 1)) as usize
         } else {
             self.rid as usize
         }

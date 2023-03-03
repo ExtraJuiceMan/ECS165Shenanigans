@@ -68,6 +68,19 @@ impl Page {
         bp.get_page(self.column_pages[METADATA_PAGE_HEADER]).slot(0)
     }
 
+    pub fn write_metadata(&self, bp: &mut BufferPool, val: u64) {
+        bp.get_page(self.column_pages[METADATA_PAGE_HEADER])
+            .write_slot(0, val);
+    }
+
+    pub fn write_page_tps(&self, bp: &mut BufferPool, val: u64) {
+        self.write_metadata(bp, val);
+    }
+
+    pub fn write_last_tail(&self, bp: &mut BufferPool, val: u64) {
+        self.write_metadata(bp, val);
+    }
+
     pub fn read_page_tps(&self, bp: &mut BufferPool) -> u64 {
         self.read_metadata(bp)
     }
@@ -91,13 +104,16 @@ impl Page {
         self.get_column(bp, column).write_slot(rid.slot(), value);
     }
 
-    pub fn copy_page(&self, bp: &mut BufferPool, new_page: &[usize], include: &[bool]) {
+    pub fn copy_page(&self, bp: &mut BufferPool, new_page: &[usize], copy_mask: usize) {
         for (i, column_id) in self.column_pages.iter().enumerate() {
-            if !include[i] {
+            if (copy_mask & (1 << i)) != 0 {
                 continue;
             }
+
             let page = bp.get_page(*column_id);
+
             let page_copy = bp.get_page(new_page[i]);
+
             let page = page
                 .raw()
                 .read()
@@ -128,7 +144,7 @@ impl PageRange {
         }
     }
 
-    pub fn is_full(&self) -> bool {
+    pub fn tail_is_full(&self) -> bool {
         RID::from(self.next_tid.load(Ordering::SeqCst)).page()
             < self.current_tail_page.load(Ordering::SeqCst)
     }

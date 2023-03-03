@@ -21,6 +21,7 @@ use rkyv::{
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use std::{
     backtrace::Backtrace,
+    borrow::Borrow,
     collections::HashSet,
     hash::BuildHasherDefault,
     slice::SliceIndex,
@@ -59,7 +60,7 @@ pub struct Table {
     range_dir: Arc<RwLock<RangeDirectory>>,
     bufferpool: Mutex<BufferPool>,
     disk: Arc<DiskManager>,
-    merge_thread_handle: (JoinHandle<()>, Sender<usize>),
+    merge_thread_handle: Option<(JoinHandle<()>, Sender<usize>)>,
 }
 
 impl Table {
@@ -74,6 +75,7 @@ impl Table {
         let range_dir_clone = Arc::clone(range_directory);
         let (send, recv) = channel();
         let handle = thread::spawn(move || {
+            let copy_mask = (0b111);
             let num_columns = num_columns;
             let page_dir = page_dir_clone;
             let range_dir = range_dir_clone;
@@ -101,14 +103,27 @@ impl Table {
                 let range_dir = range_dir.write();
                 let range = range_dir.get(merge_range);
                 let merge_from = range.current_tail_page.load(Ordering::SeqCst);
-                let stop_at = range.merged_until.load(Ordering::SeqCst);
+                let next_tid = RID::from(range.next_tid.load(Ordering::SeqCst));
+                let merge_stop_at = range.merged_until.load(Ordering::SeqCst);
                 range.merged_until.store(merge_from, Ordering::SeqCst);
 
                 drop(range_dir);
 
                 let mut tail_page_id = merge_from;
 
-                while tail_page_id > stop_at {
+                println!("Next slot: {}", next_tid.slot());
+                // Possible race condition?
+                if next_tid.slot() > 0 {
+                    tail_page_id = Page::new(
+                        page_dir
+                            .read()
+                            .get_page(tail_page_id)
+                            .expect("Bad page ID for Page Range encountered in merge"),
+                    )
+                    .read_last_tail(&mut bp) as usize;
+                }
+
+                while tail_page_id > merge_stop_at && tail_page_id != RID_INVALID as usize {
                     let tail_page = Page::new(
                         page_dir
                             .read()
@@ -116,8 +131,10 @@ impl Table {
                             .expect("Bad page ID for Page Range encountered in merge"),
                     );
 
-                    for slot in (0..PAGE_SLOTS).rev() {
-                        let base_rid = tail_page.get_column(&mut bp, METADATA_BASE_RID).slot(slot);
+                    for tail_slot in (0..PAGE_SLOTS).rev() {
+                        let base_rid = tail_page
+                            .get_column(&mut bp, METADATA_BASE_RID)
+                            .slot(tail_slot);
 
                         if seen.contains(&base_rid) {
                             continue;
@@ -127,14 +144,72 @@ impl Table {
 
                         let base_page_id = RID::from(base_rid).page();
 
-                        if !merged.contains_key(&base_page_id) {
-                            //let new_page_dir_entry = Arc::new_uninit_slice(num_columns - 2)
-                            let page_dir = page_dir.read();
+                        let page = Page::new(Arc::clone(
+                            merged.entry(base_page_id).or_insert_with(|| {
+                                let mut new_page_dir_entry =
+                                    Arc::new_uninit_slice(NUM_METADATA_COLUMNS + num_columns);
+
+                                let page_dir = page_dir.read();
+
+                                let base_cols = page_dir
+                                    .get_page(base_page_id)
+                                    .expect("Merge thread tried to access a non-existent page id");
+
+                                drop(page_dir);
+
+                                let new_page = Arc::get_mut(&mut new_page_dir_entry).unwrap();
+                                new_page[METADATA_INDIRECTION]
+                                    .write(base_cols[METADATA_INDIRECTION]);
+                                new_page[METADATA_BASE_RID].write(base_cols[METADATA_BASE_RID]);
+                                new_page[METADATA_RID].write(base_cols[METADATA_RID]);
+
+                                let mut new_column_ids =
+                                    disk.reserve_range(NUM_METADATA_COLUMNS - 3 + num_columns);
+
+                                for i in 3..(NUM_METADATA_COLUMNS + num_columns) {
+                                    new_page[i].write(new_column_ids);
+                                    new_column_ids += 1;
+                                }
+
+                                let new_page_dir_entry =
+                                    unsafe { new_page_dir_entry.assume_init() };
+
+                                Page::new(base_cols).copy_page(
+                                    &mut bp,
+                                    &new_page_dir_entry,
+                                    copy_mask,
+                                );
+
+                                new_page_dir_entry
+                            }),
+                        ));
+
+                        let tid = tail_page.get_column(&mut bp, METADATA_RID).slot(tail_slot);
+                        if page.read_page_tps(&mut bp) > tid {
+                            page.write_page_tps(&mut bp, tid);
+                        }
+
+                        for i in 3..(NUM_METADATA_COLUMNS + num_columns) {
+                            let updated_value = tail_page.get_column(&mut bp, i).slot(tail_slot);
+                            page.get_column(&mut bp, i)
+                                .write_slot(RID::from(base_rid).slot(), updated_value);
                         }
                     }
 
                     tail_page_id = tail_page.read_last_tail(&mut bp) as usize;
                 }
+
+                bp.flush_all();
+
+                let mut page_dir = page_dir.write();
+
+                for pair in &merged {
+                    println!("Merging page {}", *pair.0);
+                    page_dir.replace_page(*pair.0, pair.1);
+                }
+
+                merged.clear();
+                seen.clear();
             }
         });
 
@@ -182,11 +257,15 @@ impl Table {
             bufferpool,
             next_rid: header.next_rid.into(),
             next_tid: header.next_tid.into(),
-            merge_thread_handle,
+            merge_thread_handle: Some(merge_thread_handle),
         }
     }
 
     pub fn persist(&mut self) {
+        let merge_thread_handle = std::mem::replace(&mut self.merge_thread_handle, None).unwrap();
+        drop(merge_thread_handle.1);
+        merge_thread_handle.0.join();
+
         let header = TableHeaderPage {
             num_columns: self.num_columns,
             primary_key_index: self.primary_key_index,
@@ -248,13 +327,34 @@ impl Table {
 
     pub fn next_tid(&self, range_id: usize) -> RID {
         let mut range_dir = self.range_dir.write();
+
         if range_id >= range_dir.next_range_id() {
             assert!(range_id == range_dir.next_range_id());
-            range_dir.allocate_range(self.allocate_tail_page());
+
+            let new_page = self.allocate_tail_page();
+
+            self.get_page_by_id(new_page.current_tail_page.load(Ordering::SeqCst))
+                .write_last_tail(&mut self.bufferpool.lock(), RID_INVALID);
+
+            range_dir.allocate_range(new_page);
         }
 
-        if range_dir.get(range_id).is_full() {
-            range_dir.new_range_tail(range_id, self.allocate_tail_page());
+        let range = range_dir.get(range_id);
+        if range.tail_is_full() {
+            let last_tail_page = range.current_tail_page.load(Ordering::SeqCst);
+            let new_tail = self.allocate_tail_page();
+
+            self.get_page_by_id(new_tail.current_tail_page.load(Ordering::SeqCst))
+                .write_last_tail(&mut self.bufferpool.lock(), last_tail_page as u64);
+
+            range_dir.new_range_tail(range_id, new_tail);
+
+            self.merge_thread_handle
+                .as_ref()
+                .expect("No merge handle")
+                .1
+                .send(range_id)
+                .expect("Unable to send range id to merge channel");
         }
 
         range_dir.get(range_id).next_tid()
@@ -288,6 +388,11 @@ impl Table {
     #[inline(always)]
     fn get_page(&self, rid: RID) -> Page {
         Page::new(self.page_dir.read().get(rid).expect("Page get fail"))
+    }
+
+    #[inline(always)]
+    fn get_page_by_id(&self, id: usize) -> Page {
+        Page::new(self.page_dir.read().get_page(id).expect("Page get fail"))
     }
 
     fn find_row(&self, column_index: usize, value: u64) -> Option<RID> {
@@ -419,22 +524,24 @@ impl Table {
         }
     }
 
-    #[inline(always)]
     pub fn is_latest(&self, rid: RID) -> bool {
         self.get_page(rid)
-            .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
-            .slot(rid.slot())
-            == RID_INVALID
+            .read_page_tps(self.bufferpool.lock().borrow_mut())
+            <= self
+                .get_page(rid)
+                .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
+                .slot(rid.slot())
     }
 
-    #[inline(always)]
     pub fn get_latest(&self, rid: RID) -> RID {
-        let indir = self
-            .get_page(rid)
+        let page = self.get_page(rid);
+
+        let indir = page
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
             .slot(rid.slot());
 
-        if indir == RID_INVALID {
+        if indir == RID_INVALID || page.read_page_tps(self.bufferpool.lock().borrow_mut()) <= indir
+        {
             rid
         } else {
             indir.into()
@@ -501,7 +608,7 @@ impl Table {
             range_dir,
             disk,
             bufferpool,
-            merge_thread_handle,
+            merge_thread_handle: Some(merge_thread_handle),
         }
     }
 
@@ -613,6 +720,10 @@ impl Table {
 
         let tail_rid = self.next_tid(base_rid.page_range());
         let tail_page = self.get_page(tail_rid);
+
+        tail_page
+            .get_column(self.bufferpool.lock().borrow_mut(), METADATA_BASE_RID)
+            .write_slot(tail_rid.slot(), base_rid.raw());
 
         tail_page
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
@@ -781,6 +892,8 @@ impl Table {
 
         page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
             .write_slot(rid.slot(), rid.raw());
+
+        page.write_page_tps(self.bufferpool.lock().borrow_mut(), RID_INVALID);
 
         page.get_column(
             self.bufferpool.lock().borrow_mut(),
