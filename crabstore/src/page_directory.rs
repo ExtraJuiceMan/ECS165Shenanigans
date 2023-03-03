@@ -32,7 +32,11 @@ pub struct PageDirectory {
 impl PageDirectory {
     #[inline(always)]
     pub fn get(&self, rid: RID) -> Option<Arc<[usize]>> {
-        self.directory.get(&rid.page()).map(Arc::clone)
+        self.get_page(rid.page())
+    }
+
+    pub fn get_page(&self, page: usize) -> Option<Arc<[usize]>> {
+        self.directory.get(&page).map(Arc::clone)
     }
 
     pub fn set(&mut self, rid: RID, page_ids: &[Option<usize>]) {
@@ -108,7 +112,7 @@ impl PageDirectory {
         }
     }
 
-    pub fn persist(&mut self) {
+    pub fn persist(&self) {
         let pd_file = File::options()
             .write(true)
             .truncate(true)

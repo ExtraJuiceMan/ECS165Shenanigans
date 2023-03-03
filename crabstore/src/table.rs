@@ -1,7 +1,7 @@
 use crate::{
     bufferpool::BufferPool, disk_manager::DiskManager, page::PhysicalPage,
-    range_directory::RangeDirectory, rid::RID, PAGE_RANGE_COUNT, PAGE_RANGE_SIZE, PAGE_SIZE,
-    PAGE_SLOTS,
+    range_directory::RangeDirectory, rid::RID, BUFFERPOOL_SIZE, METADATA_BASE_RID,
+    METADATA_PAGE_HEADER, PAGE_RANGE_COUNT, PAGE_RANGE_SIZE, PAGE_SIZE, PAGE_SLOTS,
 };
 use crate::{index::Index, RID_INVALID};
 use crate::{
@@ -18,7 +18,15 @@ use rkyv::{
     ser::{serializers::BufferSerializer, Serializer},
     Archive, Deserialize, Serialize,
 };
-use std::backtrace::Backtrace;
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
+use std::{
+    backtrace::Backtrace,
+    collections::HashSet,
+    hash::BuildHasherDefault,
+    slice::SliceIndex,
+    sync::mpsc::{channel, Sender},
+    thread::{self, JoinHandle},
+};
 use std::{
     borrow::BorrowMut,
     mem::size_of,
@@ -47,13 +55,70 @@ pub struct Table {
     index: Index,
     next_rid: AtomicU64,
     next_tid: AtomicU64,
-    page_dir: RwLock<PageDirectory>,
-    range_dir: RwLock<RangeDirectory>,
+    page_dir: Arc<RwLock<PageDirectory>>,
+    range_dir: Arc<RwLock<RangeDirectory>>,
     bufferpool: Mutex<BufferPool>,
     disk: Arc<DiskManager>,
+    merge_thread_handle: (JoinHandle<()>, Sender<usize>),
 }
 
 impl Table {
+    fn spawn_merge_thread(
+        page_directory: &Arc<RwLock<PageDirectory>>,
+        range_directory: &Arc<RwLock<RangeDirectory>>,
+        disk_manager: &Arc<DiskManager>,
+    ) -> (JoinHandle<()>, Sender<usize>) {
+        let page_dir_clone = Arc::clone(page_directory);
+        let disk_manager_clone = Arc::clone(disk_manager);
+        let range_dir_clone = Arc::clone(range_directory);
+        let (send, recv) = channel();
+        let handle = thread::spawn(move || {
+            let page_dir = page_dir_clone;
+            let range_dir = range_dir_clone;
+            let disk = disk_manager_clone;
+            let recv = recv;
+            let mut seen: FxHashSet<usize> = FxHashSet::with_capacity_and_hasher(
+                PAGE_SLOTS * PAGE_RANGE_COUNT,
+                BuildHasherDefault::<FxHasher>::default(),
+            );
+            let mut merged: FxHashMap<usize, Arc<[usize]>> = FxHashMap::with_capacity_and_hasher(
+                PAGE_SLOTS * PAGE_RANGE_COUNT,
+                BuildHasherDefault::<FxHasher>::default(),
+            );
+            let mut bp = BufferPool::new(Arc::clone(&disk), BUFFERPOOL_SIZE);
+
+            loop {
+                let merge_range = recv.recv().expect("Merge thread channel closed");
+
+                let range_dir = range_dir.write();
+                let range = range_dir.get(merge_range);
+                let merge_from = range.current_tail_page.load(Ordering::SeqCst);
+                let stop_at = range.merged_until.load(Ordering::SeqCst);
+                range.merged_until.store(merge_from, Ordering::SeqCst);
+
+                drop(range_dir);
+
+                let mut tail_page_id = merge_from;
+
+                while tail_page_id > stop_at {
+                    let tail_page = Page::new(
+                        page_dir
+                            .read()
+                            .get_page(tail_page_id)
+                            .expect("Bad page ID for Page Range encountered in merge"),
+                    );
+
+                    for slot in (0..PAGE_SLOTS).rev() {
+                        let base_rid = tail_page.get_column(&mut bp, METADATA_BASE_RID).slot(slot);
+                    }
+
+                    tail_page_id = tail_page.read_last_tail(&mut bp) as usize;
+                }
+            }
+        });
+
+        return (handle, send);
+    }
     pub fn load(
         name: &str,
         db_file: &Path,
@@ -77,9 +142,11 @@ impl Table {
         disk.set_free_page_pointer(header.next_free_page);
 
         let index = Index::load(id_file);
-        let page_dir = RwLock::new(PageDirectory::load(pd_file));
-        let range_dir: RwLock<RangeDirectory> = RwLock::new(RangeDirectory::load(rd_file));
-        let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), 16));
+        let page_dir = Arc::new(RwLock::new(PageDirectory::load(pd_file)));
+        let range_dir = Arc::new(RwLock::new(RangeDirectory::load(rd_file)));
+        let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), BUFFERPOOL_SIZE));
+
+        let merge_thread_handle = Table::spawn_merge_thread(&page_dir, &range_dir, &disk);
 
         Table {
             name: name.into(),
@@ -92,6 +159,7 @@ impl Table {
             bufferpool,
             next_rid: header.next_rid.into(),
             next_tid: header.next_tid.into(),
+            merge_thread_handle,
         }
     }
 
@@ -117,10 +185,10 @@ impl Table {
 
         self.bufferpool.lock().flush_all();
 
-        let mut page_dir = self.page_dir.write();
+        let page_dir = self.page_dir.write();
         page_dir.persist();
 
-        let mut range_dir = self.range_dir.write();
+        let range_dir = self.range_dir.write();
         range_dir.persist();
 
         self.index.persist();
@@ -391,12 +459,12 @@ impl Table {
         id_file: String,
         rd_file: String,
     ) -> Table {
-        let page_dir = RwLock::new(PageDirectory::new(Path::new(&pd_file)));
-        let range_dir: RwLock<RangeDirectory> =
-            RwLock::new(RangeDirectory::new(Path::new(&rd_file)));
+        let page_dir = Arc::new(RwLock::new(PageDirectory::new(Path::new(&pd_file))));
+        let range_dir = Arc::new(RwLock::new(RangeDirectory::new(Path::new(&rd_file))));
 
         let disk = Arc::new(DiskManager::new(Path::new(&db_file)).unwrap());
-        let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), 16));
+        let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), BUFFERPOOL_SIZE));
+        let merge_thread_handle = Table::spawn_merge_thread(&page_dir, &range_dir, &disk);
 
         Table {
             name,
@@ -409,6 +477,7 @@ impl Table {
             range_dir,
             disk,
             bufferpool,
+            merge_thread_handle,
         }
     }
 

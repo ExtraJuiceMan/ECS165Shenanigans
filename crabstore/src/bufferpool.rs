@@ -66,6 +66,10 @@ impl BufferPoolFrame {
             .expect("Couldn't lock physical page, poisoned?");
         page.write_slot(slot, value);
     }
+
+    pub fn raw(&self) -> &RwLock<PhysicalPage> {
+        &self.page
+    }
 }
 
 pub struct BufferPool {

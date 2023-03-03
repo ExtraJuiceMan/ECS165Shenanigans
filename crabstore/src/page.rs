@@ -4,7 +4,8 @@ use rkyv::{Archive, Deserialize, Serialize};
 use crate::{
     bufferpool::{BufferPool, BufferPoolFrame},
     rid::{self, RID},
-    METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS, PAGE_SLOTS,
+    METADATA_INDIRECTION, METADATA_PAGE_HEADER, METADATA_RID, METADATA_SCHEMA_ENCODING,
+    NUM_METADATA_COLUMNS, PAGE_SLOTS,
 };
 use std::{
     any::TypeId,
@@ -63,6 +64,18 @@ impl Page {
         }
     }
 
+    pub fn read_metadata(&self, bp: &mut BufferPool) -> u64 {
+        bp.get_page(self.column_pages[METADATA_PAGE_HEADER]).slot(0)
+    }
+
+    pub fn read_page_tps(&self, bp: &mut BufferPool) -> u64 {
+        self.read_metadata(bp)
+    }
+
+    pub fn read_last_tail(&self, bp: &mut BufferPool) -> u64 {
+        self.read_metadata(bp)
+    }
+
     #[inline(always)]
     pub fn get_column(&self, bp: &mut BufferPool, index: usize) -> Arc<BufferPoolFrame> {
         bp.get_page(self.column_pages[index])
@@ -77,12 +90,30 @@ impl Page {
     pub fn write_slot(&mut self, bp: &mut BufferPool, column: usize, rid: RID, value: u64) {
         self.get_column(bp, column).write_slot(rid.slot(), value);
     }
+
+    pub fn copy_page(&self, bp: &mut BufferPool, new_page: &Arc<[usize]>) {
+        for (i, column_id) in self.column_pages.iter().enumerate() {
+            let page = bp.get_page(*column_id);
+            let page_copy = bp.get_page(new_page[i]);
+            let page = page
+                .raw()
+                .read()
+                .expect("Failed to acquire merge page lock");
+            let mut page_copy = page_copy
+                .raw()
+                .write()
+                .expect("Failed to acquire merge page lock");
+
+            page_copy.page.clone_from(&page.page);
+        }
+    }
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug)]
 pub struct PageRange {
-    next_tid: AtomicU64,
-    current_tail_page: AtomicUsize,
+    pub next_tid: AtomicU64,
+    pub current_tail_page: AtomicUsize,
+    pub merged_until: AtomicUsize,
 }
 
 impl PageRange {
@@ -90,8 +121,10 @@ impl PageRange {
         PageRange {
             next_tid: next_tid.into(),
             current_tail_page: current_tail_page.into(),
+            merged_until: 0.into(),
         }
     }
+
     pub fn is_full(&self) -> bool {
         RID::from(self.next_tid.load(Ordering::SeqCst)).page()
             < self.current_tail_page.load(Ordering::SeqCst)
