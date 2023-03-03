@@ -131,7 +131,7 @@ def benchmark():
 	query = Query(grades_table)
 	keys = []
 
-	num_its = 25000
+	num_its = 20000
 
 	insert_time_0 = perf_counter()
 	for i in range(0, num_its):
