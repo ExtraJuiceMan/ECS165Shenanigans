@@ -38,7 +38,8 @@ impl RangeDirectory {
     }
 
     pub fn new_range_tail(&mut self, range: usize, new_tail: PageRange) {
-        self.directory[range] = new_tail;
+        self.directory[range].current_tail_page = new_tail.current_tail_page;
+        self.directory[range].next_tid = new_tail.next_tid;
     }
 
     pub fn new(path: &Path) -> Self {

@@ -25,16 +25,22 @@ const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
 const PAGE_RANGE_COUNT: usize = 16;
 const PAGE_RANGE_SIZE: usize = PAGE_SIZE * PAGE_RANGE_COUNT;
 const RANGE_PAGE_COUNT: usize = PAGE_RANGE_SIZE / PAGE_SIZE;
-const NUM_METADATA_COLUMNS: usize = 4;
+
+const NUM_METADATA_COLUMNS: usize = 6;
 
 const METADATA_INDIRECTION: usize = 0;
 const METADATA_RID: usize = 1;
-const METADATA_TIMESTAMP: usize = 2;
-const METADATA_SCHEMA_ENCODING: usize = 3;
+const METADATA_BASE_RID: usize = 2;
+
+const NUM_STATIC_COLUMNS: usize = 3;
+
+const METADATA_PAGE_HEADER: usize = 3;
+const METADATA_TIMESTAMP: usize = 4;
+const METADATA_SCHEMA_ENCODING: usize = 5;
 // 0xFF...FF
 const RID_INVALID: u64 = !0;
 
-const BUFFERPOOL_SIZE: usize = 64;
+const BUFFERPOOL_SIZE: usize = 16;
 
 pub mod bufferpool;
 pub mod disk_manager;
@@ -148,9 +154,6 @@ impl CrabStore {
         num_columns: usize,
         key_index: usize,
     ) -> Py<Table> {
-        if (self.directory.is_none()) {
-            self.open(String::from("./tmp"));
-        }
         Python::with_gil(|py| -> Py<Table> {
             let table: Py<Table> = Py::new(
                 py,

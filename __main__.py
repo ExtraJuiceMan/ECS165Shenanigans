@@ -4,7 +4,7 @@ from time import perf_counter
 from random import choice, randrange, seed, randint
 
 from lstore.db import Database
-from lstore.query import Query
+from lstore.query import Query, Index
 
 from random import choice, randint, sample, seed
 from shutil import rmtree
@@ -22,6 +22,11 @@ def validate():
 
 	# create a query class for the grades table
 	query = Query(grades_table)
+	index = Index(grades_table)
+
+	index.create_index(1)
+	index.create_index(2)
+	index.create_index(3)
 
 	# dictionary for records to test the database: test directory
 	records = {}
@@ -75,6 +80,7 @@ def validate():
 			records[key][i] = value
 			query.update(key, *updated_columns)
 			record = query.select(key, 0, [1, 1, 1, 1, 1])[0]
+			#print('Select for key: ', key, ' ', record)
 			error = False
 			for j, column in enumerate(record.columns):
 				if column != records[key][j]:
@@ -89,7 +95,7 @@ def validate():
 				else:
 					error = len([x for x in record if x.columns[0] == key]) == 0
 			if error:
-				print('select error on non-primary key', update_column, 'and', updated_columns, ':', record, ', correct:', records[key])
+				print('select error on non-primary key', update_column, 'and', updated_columns, ':', [x.columns for x in record], ', correct:', records[key])
 			else:
 				pass
 			#	print('update on', original, 'and', updated_columns, ':', record)

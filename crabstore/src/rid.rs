@@ -17,12 +17,16 @@ impl RID {
         self.rid >> (usize::BITS - 1) & 1 != 0
     }
 
+    pub fn is_invalid(&self) -> bool {
+        self.rid == !0
+    }
+
     /*
        "Untail" the page if it is a tail by inverting the bits to create readable numbers
     */
     pub fn untail(&self) -> usize {
         if self.is_tail() {
-            (!self.rid - 1) as usize
+            (!(self.rid + 1)) as usize
         } else {
             self.rid as usize
         }

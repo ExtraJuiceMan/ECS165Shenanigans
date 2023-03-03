@@ -66,6 +66,10 @@ impl BufferPoolFrame {
             .expect("Couldn't lock physical page, poisoned?");
         page.write_slot(slot, value);
     }
+
+    pub fn raw(&self) -> &RwLock<PhysicalPage> {
+        &self.page
+    }
 }
 
 pub struct BufferPool {
@@ -137,6 +141,10 @@ impl BufferPool {
         }
 
         frame.page_id.store(!0, Ordering::SeqCst);
+    }
+
+    pub fn is_page_mapped(&self, page_id: usize) -> bool {
+        self.page_frame_map.contains_key(&page_id)
     }
 
     pub fn new_page(&mut self) -> Arc<BufferPoolFrame> {

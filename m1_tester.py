@@ -4,6 +4,7 @@ from lstore.query import Query
 from random import choice, randint, sample, seed
 
 db = Database()
+db.open('CRAB_DB_m1_tester')
 # Create a table  with 5 columns
 #   Student Id and 4 grades
 #   The first argument is name of the table
@@ -85,3 +86,4 @@ for c in range(0, grades_table.num_columns):
         else:
             pass
             # print('sum on [', keys[r[0]], ',', keys[r[1]], ']: ', column_sum)
+db.close()

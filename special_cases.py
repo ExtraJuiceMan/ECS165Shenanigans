@@ -1,6 +1,6 @@
 from lstore.db import Database
 from lstore.query import Query
-
+from time import sleep
 from random import choice, randint, sample, seed
 
 db = Database()
@@ -38,15 +38,22 @@ print("Insert finished")
 # test 3: select that returns multiple records
 for key in records:
     record = query.select(key, 0, [1, 1, 1, 1])
-    print('select on', key, ':', record)
+    print('select on', key, ':', [x.columns for x in record])
 print('test 3 finished')
 
 # test 4: select that returns no records
 for key in records:
     record = query.select(key, 5, [1, 1, 1, 1])
-    print('select on', key, ': ', record)
+    print('select on', key, ': ', [x.columns for x in record])
 print('test 4 finished')
 
 # test 5: update on no record (primary key does not exist in the table)
-print('successfully updated : ', query.update(90, [1, 1, 1, 1]))
+print('successfully updated : ', query.update(90, *[1, 1, 1, 1]))
 print('test 5 finished')
+
+# test 6: THE GIGA INSERT QUERY
+for _ in range(100000):
+    query.insert(*[key, 69, 420, 69, 420])
+print(query.select(420, 2, [1, 1, 1, 1,]))
+print('GIGA INSERT FINISHED')
+db.close()

@@ -19,3 +19,7 @@ crabstore/ECS165/Grades_db.CRAB
 crabstore/ECS165/Grades_id.CRAB
 crabstore/ECS165/Grades_pd.CRAB
 crabstore/ECS165/Grades_rd.CRAB
+crabstore/meme/Grades_id.CRAB
+crabstore/meme/Grades_rd.CRAB
+CRAB_DB_*
+ECS165/*
