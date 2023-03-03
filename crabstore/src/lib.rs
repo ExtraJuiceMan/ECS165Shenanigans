@@ -40,7 +40,7 @@ const METADATA_SCHEMA_ENCODING: usize = 5;
 // 0xFF...FF
 const RID_INVALID: u64 = !0;
 
-const BUFFERPOOL_SIZE: usize = 64;
+const BUFFERPOOL_SIZE: usize = 16;
 
 pub mod bufferpool;
 pub mod disk_manager;

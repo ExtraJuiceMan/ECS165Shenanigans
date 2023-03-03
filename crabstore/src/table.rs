@@ -721,14 +721,20 @@ impl Table {
         let base_page = self.get_page(base_rid);
         let updated_values = self.merge_values(base_rid, &vals);
 
-        let old_latest_rid = self.get_latest(base_rid);
+        let old_latest_rid: RID = self
+            .get_page(base_rid)
+            .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
+            .slot(base_rid.slot())
+            .into();
 
-        let old_schema_encoding = base_page
+        let base_latest = self.get_latest(base_rid);
+        let old_schema_encoding = self
+            .get_page(base_latest)
             .get_column(
                 self.bufferpool.lock().borrow_mut(),
                 METADATA_SCHEMA_ENCODING,
             )
-            .slot(base_rid.slot());
+            .slot(base_latest.slot());
 
         let tail_rid = self.next_tid(base_rid.page_range());
         let tail_page = self.get_page(tail_rid);
@@ -739,7 +745,14 @@ impl Table {
 
         tail_page
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
-            .write_slot(tail_rid.slot(), old_latest_rid.raw());
+            .write_slot(
+                tail_rid.slot(),
+                if old_latest_rid.is_invalid() {
+                    base_rid.raw()
+                } else {
+                    old_latest_rid.raw()
+                },
+            );
 
         tail_page
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
@@ -765,7 +778,7 @@ impl Table {
             if !v.is_none() {
                 schema_encoding |= 1 << i;
                 self.index.update_index(i, v.unwrap(), base_rid);
-                if old_schema_encoding == 0 {
+                if (old_schema_encoding & (1 << i)) == 1 || old_latest_rid.is_invalid() {
                     self.index.remove_index(
                         i,
                         base_page
@@ -776,7 +789,7 @@ impl Table {
                             .slot(base_rid.slot()),
                         base_rid,
                     );
-                } else {
+                } else if !old_latest_rid.is_invalid() && (old_schema_encoding & (1 << i)) == 1 {
                     self.index.remove_index(
                         i,
                         self.get_page(old_latest_rid)
@@ -791,18 +804,18 @@ impl Table {
             }
         }
 
-        //print!("Update called\n");
-
-        base_page
-            .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
-            .write_slot(base_rid.slot(), tail_rid.raw());
-
-        base_page
+        tail_page
             .get_column(
                 self.bufferpool.lock().borrow_mut(),
                 METADATA_SCHEMA_ENCODING,
             )
             .write_slot(base_rid.slot(), schema_encoding);
+
+        //print!("Update called\n");
+
+        base_page
+            .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
+            .write_slot(base_rid.slot(), tail_rid.raw());
 
         true
     }
@@ -924,15 +937,43 @@ impl Table {
             .write_slot(rid.slot(), val.extract().unwrap());
         }
 
-        self.index.update_index(
-            self.primary_key_index,
-            values
-                .get_item(self.primary_key_index)
-                .unwrap()
-                .extract()
-                .unwrap(),
-            rid,
-        );
+        for i in 0..self.num_columns {
+            self.index
+                .update_index(i, values.get_item(i).unwrap().extract().unwrap(), rid);
+        }
+    }
+
+    pub fn build_index(&mut self, column_num: usize) {
+        self.index.create_index(column_num);
+        let mut rid: RID = 0.into();
+        let max_rid = self.next_rid.load(Ordering::SeqCst);
+        while rid.raw() < max_rid {
+            if self
+                .get_page(rid)
+                .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
+                .slot(rid.slot())
+                == RID_INVALID
+            {
+                continue;
+            }
+            
+            let latest = self.get_latest(rid);
+            self.index.update_index(
+                column_num,
+                self.get_page(latest)
+                    .get_column(
+                        self.bufferpool.lock().borrow_mut(),
+                        NUM_METADATA_COLUMNS + column_num,
+                    )
+                    .slot(latest.slot()),
+                rid,
+            );
+            rid = rid.next();
+        }
+    }
+
+    pub fn drop_index(&mut self, column_num: usize) {
+        self.index.drop_index(column_num);
     }
 
     pub fn print(&self) {

@@ -4,7 +4,7 @@ from time import perf_counter
 from random import choice, randrange, seed, randint
 
 from lstore.db import Database
-from lstore.query import Query
+from lstore.query import Query, Index
 
 from random import choice, randint, sample, seed
 from shutil import rmtree
@@ -22,6 +22,11 @@ def validate():
 
 	# create a query class for the grades table
 	query = Query(grades_table)
+	index = Index(grades_table)
+
+	index.create_index(1)
+	index.create_index(2)
+	index.create_index(3)
 
 	# dictionary for records to test the database: test directory
 	records = {}
