@@ -1,4 +1,5 @@
 use parking_lot::lock_api::RwLock;
+use rkyv::{Archive, Deserialize, Serialize};
 
 use crate::{
     bufferpool::{BufferPool, BufferPoolFrame},
@@ -78,6 +79,7 @@ impl Page {
     }
 }
 
+#[derive(Archive, Serialize, Deserialize, Debug)]
 pub struct PageRange {
     next_tid: AtomicU64,
     current_tail_page: AtomicUsize,

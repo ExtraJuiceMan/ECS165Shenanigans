@@ -1,6 +1,7 @@
 use crate::{
-    bufferpool::BufferPool, disk_manager::DiskManager, page::PhysicalPage, rid::RID,
-    PAGE_RANGE_COUNT, PAGE_RANGE_SIZE, PAGE_SIZE, PAGE_SLOTS,
+    bufferpool::BufferPool, disk_manager::DiskManager, page::PhysicalPage,
+    range_directory::RangeDirectory, rid::RID, PAGE_RANGE_COUNT, PAGE_RANGE_SIZE, PAGE_SIZE,
+    PAGE_SLOTS,
 };
 use crate::{index::Index, RID_INVALID};
 use crate::{
@@ -47,13 +48,19 @@ pub struct Table {
     next_rid: AtomicU64,
     next_tid: AtomicU64,
     page_dir: RwLock<PageDirectory>,
+    range_dir: RwLock<RangeDirectory>,
     bufferpool: Mutex<BufferPool>,
-    range_dir: RwLock<Vec<PageRange>>,
     disk: Arc<DiskManager>,
 }
 
 impl Table {
-    pub fn load(name: &str, db_file: &Path, pd_file: &Path, id_file: &Path) -> Self {
+    pub fn load(
+        name: &str,
+        db_file: &Path,
+        pd_file: &Path,
+        id_file: &Path,
+        rd_file: &Path,
+    ) -> Self {
         let disk = Arc::new(DiskManager::new(db_file).expect("Failed to open table file"));
 
         let mut page = PhysicalPage::default();
@@ -67,10 +74,11 @@ impl Table {
             .expect("Failed to deserialize table header")
         };
 
-        let index = Index::load(id_file);
+        disk.set_free_page_pointer(header.next_free_page);
 
+        let index = Index::load(id_file);
         let page_dir = RwLock::new(PageDirectory::load(pd_file));
-        let range_dir: RwLock<Vec<PageRange>> = RwLock::new(Vec::with_capacity(3));
+        let range_dir: RwLock<RangeDirectory> = RwLock::new(RangeDirectory::load(rd_file));
         let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), 16));
 
         Table {
@@ -112,6 +120,9 @@ impl Table {
         let mut page_dir = self.page_dir.write();
         page_dir.persist();
 
+        let mut range_dir = self.range_dir.write();
+        range_dir.persist();
+
         self.index.persist();
     }
 
@@ -146,18 +157,16 @@ impl Table {
 
     pub fn next_tid(&self, range_id: usize) -> RID {
         let mut range_dir = self.range_dir.write();
-        if range_id >= range_dir.len() {
-            assert!(range_id == range_dir.len());
-            if range_id >= range_dir.len() {
-                range_dir.push(self.allocate_tail_page());
-            }
+        if range_id >= range_dir.next_range_id() {
+            assert!(range_id == range_dir.next_range_id());
+            range_dir.allocate_range(self.allocate_tail_page());
         }
 
-        if range_dir[range_id].is_full() {
-            range_dir[range_id] = self.allocate_tail_page();
+        if range_dir.get(range_id).is_full() {
+            range_dir.new_range_tail(range_id, self.allocate_tail_page());
         }
 
-        range_dir[range_id].next_tid()
+        range_dir.get(range_id).next_tid()
     }
 
     pub fn allocate_tail_page(&self) -> PageRange {
@@ -175,9 +184,10 @@ impl Table {
         }
 
         let column_pages = unsafe { column_pages.assume_init() };
+
         let mut page_dir = self.page_dir.write();
 
-        page_dir.new_page(next_tid.page(), Arc::clone(&column_pages));
+        page_dir.new_page(next_tid.page(), column_pages);
 
         drop(page_dir);
 
@@ -379,12 +389,14 @@ impl Table {
         db_file: String,
         pd_file: String,
         id_file: String,
+        rd_file: String,
     ) -> Table {
         let page_dir = RwLock::new(PageDirectory::new(Path::new(&pd_file)));
-        let range_dir: RwLock<Vec<PageRange>> = RwLock::new(Vec::new());
+        let range_dir: RwLock<RangeDirectory> =
+            RwLock::new(RangeDirectory::new(Path::new(&rd_file)));
 
         let disk = Arc::new(DiskManager::new(Path::new(&db_file)).unwrap());
-        let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), 128));
+        let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), 16));
 
         Table {
             name,

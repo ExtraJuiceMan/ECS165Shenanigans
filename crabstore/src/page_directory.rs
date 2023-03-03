@@ -98,11 +98,13 @@ impl PageDirectory {
 
         let archived = unsafe { rkyv::archived_root::<FxHashMap<usize, Arc<[usize]>>>(&pd_bytes) };
 
+        let directory = archived
+            .deserialize(&mut SharedDeserializeMap::new())
+            .expect("Failed to deserialize page directory");
+
         PageDirectory {
             path: path.into(),
-            directory: archived
-                .deserialize(&mut SharedDeserializeMap::new())
-                .expect("Failed to deserialize page directory"),
+            directory,
         }
     }
 

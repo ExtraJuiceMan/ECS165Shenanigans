@@ -41,6 +41,7 @@ pub mod disk_manager;
 pub mod index;
 pub mod page;
 mod page_directory;
+mod range_directory;
 pub mod rid;
 pub mod table;
 use crate::index::Index;
@@ -122,6 +123,13 @@ impl CrabStore {
 
         self.directory.as_ref().unwrap().join(Path::new(&id_file))
     }
+
+    pub fn range_filename(&self, table: &str) -> PathBuf {
+        let mut rd_file = table.to_string();
+        rd_file.push_str("_rd.CRAB");
+
+        self.directory.as_ref().unwrap().join(Path::new(&rd_file))
+    }
 }
 
 #[pymethods]
@@ -159,6 +167,10 @@ impl CrabStore {
                         .unwrap()
                         .to_string(),
                     self.index_filename(name.as_str())
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                    self.range_filename(name.as_str())
                         .to_str()
                         .unwrap()
                         .to_string(),
@@ -215,6 +227,7 @@ impl CrabStore {
                             &self.table_filename(name.as_ref()),
                             &self.page_dir_filename(name.as_ref()),
                             &self.index_filename(name.as_ref()),
+                            &self.range_filename(name.as_ref()),
                         ),
                     )
                     .unwrap(),

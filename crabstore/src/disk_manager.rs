@@ -78,4 +78,8 @@ impl DiskManager {
     pub fn free_page_pointer(&self) -> usize {
         self.next_free_page.load(Ordering::SeqCst)
     }
+
+    pub fn set_free_page_pointer(&self, ptr: usize) {
+        self.next_free_page.store(ptr, Ordering::SeqCst)
+    }
 }

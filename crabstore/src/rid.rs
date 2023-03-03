@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use rkyv::{Archive, Serialize, Deserialize};
+use rkyv::{Archive, Deserialize, Serialize};
 
 use crate::{PAGE_RANGE_COUNT, PAGE_RANGE_SIZE};
 
@@ -35,12 +35,12 @@ impl RID {
         self.untail() & 0b111111111
     }
 
-    /*
-       No untail here since we want unique page sequences and the
-       pages are virtually mapped by our directory anyway
-    */
     pub fn page(&self) -> usize {
-        (self.rid >> 9) as usize
+        if self.is_tail() {
+            ((self.rid + 1) >> 9) as usize
+        } else {
+            (self.rid >> 9) as usize
+        }
     }
 
     pub fn page_range(&self) -> usize {
