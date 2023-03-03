@@ -1,4 +1,4 @@
-use parking_lot::lock_api::RwLock;
+use parking_lot::{lock_api::RwLock, Mutex};
 use rkyv::{Archive, Deserialize, Serialize};
 
 use crate::{
@@ -64,6 +64,10 @@ impl Page {
         }
     }
 
+    pub fn read_col(&self, index: usize) -> usize {
+        self.column_pages[index]
+    }
+
     pub fn read_metadata(&self, bp: &mut BufferPool) -> u64 {
         bp.get_page(self.column_pages[METADATA_PAGE_HEADER]).slot(0)
     }
@@ -103,29 +107,6 @@ impl Page {
     pub fn write_slot(&mut self, bp: &mut BufferPool, column: usize, rid: RID, value: u64) {
         self.get_column(bp, column).write_slot(rid.slot(), value);
     }
-
-    pub fn copy_page(&self, bp: &mut BufferPool, new_page: &[usize], copy_mask: usize) {
-        for (i, column_id) in self.column_pages.iter().enumerate() {
-            if (copy_mask & (1 << i)) != 0 {
-                continue;
-            }
-
-            let page = bp.get_page(*column_id);
-
-            let page_copy = bp.get_page(new_page[i]);
-
-            let page = page
-                .raw()
-                .read()
-                .expect("Failed to acquire merge page lock");
-            let mut page_copy = page_copy
-                .raw()
-                .write()
-                .expect("Failed to acquire merge page lock");
-
-            page_copy.page.clone_from(&page.page);
-        }
-    }
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug)]
@@ -146,7 +127,7 @@ impl PageRange {
 
     pub fn tail_is_full(&self) -> bool {
         RID::from(self.next_tid.load(Ordering::SeqCst)).page()
-            < self.current_tail_page.load(Ordering::SeqCst)
+            != self.current_tail_page.load(Ordering::SeqCst)
     }
 
     pub fn next_tid(&self) -> RID {

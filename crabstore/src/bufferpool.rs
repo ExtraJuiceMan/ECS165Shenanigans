@@ -143,6 +143,10 @@ impl BufferPool {
         frame.page_id.store(!0, Ordering::SeqCst);
     }
 
+    pub fn is_page_mapped(&self, page_id: usize) -> bool {
+        self.page_frame_map.contains_key(&page_id)
+    }
+
     pub fn new_page(&mut self) -> Arc<BufferPoolFrame> {
         let new_page_id = self.disk.reserve_page();
 

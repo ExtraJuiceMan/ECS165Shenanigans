@@ -74,10 +74,12 @@ impl PageDirectory {
             .expect("Tried to allocate new page with existing page number");
     }
 
-    pub fn replace_page(&mut self, page_num: usize, replacement: &Arc<[usize]>) {
-        self.directory
-            .insert(page_num, Arc::clone(replacement))
-            .expect("Tried to replace page that doesn't exist");
+    pub fn replace_page(
+        &mut self,
+        page_num: usize,
+        replacement: &Arc<[usize]>,
+    ) -> Option<Arc<[usize]>> {
+        self.directory.insert(page_num, Arc::clone(replacement))
     }
 
     pub fn new(path: &Path) -> Self {

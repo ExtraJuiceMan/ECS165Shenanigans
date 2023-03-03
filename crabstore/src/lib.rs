@@ -31,6 +31,9 @@ const NUM_METADATA_COLUMNS: usize = 6;
 const METADATA_INDIRECTION: usize = 0;
 const METADATA_RID: usize = 1;
 const METADATA_BASE_RID: usize = 2;
+
+const NUM_STATIC_COLUMNS: usize = 3;
+
 const METADATA_PAGE_HEADER: usize = 3;
 const METADATA_TIMESTAMP: usize = 4;
 const METADATA_SCHEMA_ENCODING: usize = 5;

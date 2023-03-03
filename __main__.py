@@ -75,6 +75,7 @@ def validate():
 			records[key][i] = value
 			query.update(key, *updated_columns)
 			record = query.select(key, 0, [1, 1, 1, 1, 1])[0]
+			#print('Select for key: ', key, ' ', record)
 			error = False
 			for j, column in enumerate(record.columns):
 				if column != records[key][j]:
@@ -89,7 +90,7 @@ def validate():
 				else:
 					error = len([x for x in record if x.columns[0] == key]) == 0
 			if error:
-				print('select error on non-primary key', update_column, 'and', updated_columns, ':', record, ', correct:', records[key])
+				print('select error on non-primary key', update_column, 'and', updated_columns, ':', [x.columns for x in record], ', correct:', records[key])
 			else:
 				pass
 			#	print('update on', original, 'and', updated_columns, ':', record)
