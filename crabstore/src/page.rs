@@ -91,8 +91,11 @@ impl Page {
         self.get_column(bp, column).write_slot(rid.slot(), value);
     }
 
-    pub fn copy_page(&self, bp: &mut BufferPool, new_page: &Arc<[usize]>) {
+    pub fn copy_page(&self, bp: &mut BufferPool, new_page: &[usize], include: &[bool]) {
         for (i, column_id) in self.column_pages.iter().enumerate() {
+            if !include[i] {
+                continue;
+            }
             let page = bp.get_page(*column_id);
             let page_copy = bp.get_page(new_page[i]);
             let page = page

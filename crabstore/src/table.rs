@@ -67,17 +67,19 @@ impl Table {
         page_directory: &Arc<RwLock<PageDirectory>>,
         range_directory: &Arc<RwLock<RangeDirectory>>,
         disk_manager: &Arc<DiskManager>,
+        num_columns: usize,
     ) -> (JoinHandle<()>, Sender<usize>) {
         let page_dir_clone = Arc::clone(page_directory);
         let disk_manager_clone = Arc::clone(disk_manager);
         let range_dir_clone = Arc::clone(range_directory);
         let (send, recv) = channel();
         let handle = thread::spawn(move || {
+            let num_columns = num_columns;
             let page_dir = page_dir_clone;
             let range_dir = range_dir_clone;
             let disk = disk_manager_clone;
             let recv = recv;
-            let mut seen: FxHashSet<usize> = FxHashSet::with_capacity_and_hasher(
+            let mut seen: FxHashSet<u64> = FxHashSet::with_capacity_and_hasher(
                 PAGE_SLOTS * PAGE_RANGE_COUNT,
                 BuildHasherDefault::<FxHasher>::default(),
             );
@@ -88,7 +90,13 @@ impl Table {
             let mut bp = BufferPool::new(Arc::clone(&disk), BUFFERPOOL_SIZE);
 
             loop {
-                let merge_range = recv.recv().expect("Merge thread channel closed");
+                let merge_range = recv.recv();
+
+                if merge_range.is_err() {
+                    return;
+                }
+
+                let merge_range = merge_range.unwrap();
 
                 let range_dir = range_dir.write();
                 let range = range_dir.get(merge_range);
@@ -110,6 +118,19 @@ impl Table {
 
                     for slot in (0..PAGE_SLOTS).rev() {
                         let base_rid = tail_page.get_column(&mut bp, METADATA_BASE_RID).slot(slot);
+
+                        if seen.contains(&base_rid) {
+                            continue;
+                        }
+
+                        seen.insert(base_rid);
+
+                        let base_page_id = RID::from(base_rid).page();
+
+                        if !merged.contains_key(&base_page_id) {
+                            //let new_page_dir_entry = Arc::new_uninit_slice(num_columns - 2)
+                            let page_dir = page_dir.read();
+                        }
                     }
 
                     tail_page_id = tail_page.read_last_tail(&mut bp) as usize;
@@ -117,8 +138,9 @@ impl Table {
             }
         });
 
-        return (handle, send);
+        (handle, send)
     }
+
     pub fn load(
         name: &str,
         db_file: &Path,
@@ -146,7 +168,8 @@ impl Table {
         let range_dir = Arc::new(RwLock::new(RangeDirectory::load(rd_file)));
         let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), BUFFERPOOL_SIZE));
 
-        let merge_thread_handle = Table::spawn_merge_thread(&page_dir, &range_dir, &disk);
+        let merge_thread_handle =
+            Table::spawn_merge_thread(&page_dir, &range_dir, &disk, header.num_columns);
 
         Table {
             name: name.into(),
@@ -464,7 +487,8 @@ impl Table {
 
         let disk = Arc::new(DiskManager::new(Path::new(&db_file)).unwrap());
         let bufferpool = Mutex::new(BufferPool::new(Arc::clone(&disk), BUFFERPOOL_SIZE));
-        let merge_thread_handle = Table::spawn_merge_thread(&page_dir, &range_dir, &disk);
+        let merge_thread_handle =
+            Table::spawn_merge_thread(&page_dir, &range_dir, &disk, num_columns);
 
         Table {
             name,
