@@ -35,19 +35,19 @@ impl BufferPoolFrame {
             .write()
             .expect("Failed to acquire lock, lock poisoning?");
 
-        disk.write_page(self.page_id.load(Ordering::SeqCst), &page.page);
-
+        disk.write_page(self.page_id.load(Ordering::Relaxed), &page.page);
         disk.flush();
-        self.dirty.store(false, Ordering::SeqCst);
-        self.page_id.store(!0, Ordering::SeqCst);
+
+        self.dirty.store(false, Ordering::Relaxed);
+        self.page_id.store(!0, Ordering::Relaxed);
     }
 
     pub fn mark_dirty(&self) {
-        self.dirty.store(true, Ordering::SeqCst);
+        self.dirty.store(true, Ordering::Relaxed);
     }
 
     pub fn get_page_id(&self) -> usize {
-        self.page_id.load(Ordering::SeqCst)
+        self.page_id.load(Ordering::Relaxed)
     }
 
     pub fn slot(&self, slot: usize) -> u64 {
@@ -123,7 +123,7 @@ impl BufferPool {
 
     pub fn flush_all(&mut self) {
         for i in 0..self.size {
-            if self.frames[i].dirty.load(Ordering::SeqCst) {
+            if self.frames[i].dirty.load(Ordering::Relaxed) {
                 self.frames[i].flush(self.disk.borrow());
             }
         }
@@ -134,13 +134,15 @@ impl BufferPool {
         let frame = &self.frames[victim];
 
         self.page_frame_map
-            .remove(&frame.page_id.load(Ordering::SeqCst));
+            .remove(&frame.page_id.load(Ordering::Relaxed));
 
-        if frame.dirty.load(Ordering::SeqCst) {
+        if frame.dirty.load(Ordering::Relaxed) {
             frame.flush(self.disk.borrow());
         }
 
-        frame.page_id.store(!0, Ordering::SeqCst);
+        frame.dirty.store(false, Ordering::Relaxed);
+
+        frame.page_id.store(!0, Ordering::Relaxed);
     }
 
     pub fn is_page_mapped(&self, page_id: usize) -> bool {
@@ -156,7 +158,7 @@ impl BufferPool {
 
         let frame = Arc::clone(&self.frames[victim]);
 
-        frame.page_id.store(new_page_id, Ordering::SeqCst);
+        frame.page_id.store(new_page_id, Ordering::Relaxed);
         self.page_frame_map.insert(new_page_id, victim);
 
         frame
@@ -177,7 +179,7 @@ impl BufferPool {
 
         let frame = Arc::clone(&self.frames[victim]);
 
-        frame.page_id.store(page_id, Ordering::SeqCst);
+        frame.page_id.store(page_id, Ordering::Relaxed);
 
         let mut page = frame
             .page

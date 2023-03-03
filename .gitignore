@@ -23,3 +23,4 @@ crabstore/meme/Grades_id.CRAB
 crabstore/meme/Grades_rd.CRAB
 CRAB_DB_*
 ECS165/*
+crabstore/src/table.rs

@@ -24,9 +24,9 @@ def validate():
 	query = Query(grades_table)
 	index = Index(grades_table)
 
-	index.create_index(1)
-	index.create_index(2)
-	index.create_index(3)
+	#index.create_index(1)
+	#index.create_index(2)
+	#index.create_index(3)
 
 	# dictionary for records to test the database: test directory
 	records = {}

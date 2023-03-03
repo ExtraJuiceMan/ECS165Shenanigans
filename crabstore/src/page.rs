@@ -126,11 +126,11 @@ impl PageRange {
     }
 
     pub fn tail_is_full(&self) -> bool {
-        RID::from(self.next_tid.load(Ordering::SeqCst)).page()
-            != self.current_tail_page.load(Ordering::SeqCst)
+        RID::from(self.next_tid.load(Ordering::Relaxed)).page()
+            != self.current_tail_page.load(Ordering::Relaxed)
     }
 
     pub fn next_tid(&self) -> RID {
-        self.next_tid.fetch_sub(1, Ordering::SeqCst).into()
+        self.next_tid.fetch_sub(1, Ordering::Relaxed).into()
     }
 }

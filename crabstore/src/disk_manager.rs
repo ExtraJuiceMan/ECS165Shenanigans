@@ -68,18 +68,18 @@ impl DiskManager {
     }
 
     pub fn reserve_page(&self) -> usize {
-        self.next_free_page.fetch_add(1, Ordering::SeqCst)
+        self.next_free_page.fetch_add(1, Ordering::Relaxed)
     }
 
     pub fn reserve_range(&self, pages: usize) -> usize {
-        self.next_free_page.fetch_add(pages, Ordering::SeqCst)
+        self.next_free_page.fetch_add(pages, Ordering::Relaxed)
     }
 
     pub fn free_page_pointer(&self) -> usize {
-        self.next_free_page.load(Ordering::SeqCst)
+        self.next_free_page.load(Ordering::Relaxed)
     }
 
     pub fn set_free_page_pointer(&self, ptr: usize) {
-        self.next_free_page.store(ptr, Ordering::SeqCst)
+        self.next_free_page.store(ptr, Ordering::Relaxed)
     }
 }

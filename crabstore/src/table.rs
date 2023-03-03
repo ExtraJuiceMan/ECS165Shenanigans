@@ -107,7 +107,7 @@ impl Table {
 
                 let range_dir = range_dir.write();
                 let range = range_dir.get(merge_range);
-                let merge_from = range.current_tail_page.load(Ordering::SeqCst);
+                let merge_from = range.current_tail_page.load(Ordering::Relaxed);
 
                 let last_page = Page::new(
                     page_dir
@@ -118,9 +118,9 @@ impl Table {
                 .read_last_tail(&mut main_bufferpool.lock())
                     as usize;
 
-                let merge_stop_at = range.merged_until.load(Ordering::SeqCst);
+                let merge_stop_at = range.merged_until.load(Ordering::Relaxed);
 
-                range.merged_until.store(last_page, Ordering::SeqCst);
+                range.merged_until.store(last_page, Ordering::Relaxed);
 
                 drop(range_dir);
 
@@ -180,10 +180,11 @@ impl Table {
                                 let new_page_dir_entry =
                                     unsafe { new_page_dir_entry.assume_init() };
 
+                                let bp = &mut main_bufferpool.lock();
+
                                 for i in NUM_STATIC_COLUMNS..(NUM_METADATA_COLUMNS + num_columns) {
-                                    let page = main_bufferpool.lock().get_page(base_cols[i]);
-                                    let page_copy =
-                                        &mut main_bufferpool.lock().get_page(new_page_dir_entry[i]);
+                                    let page = bp.get_page(base_cols[i]);
+                                    let page_copy = bp.get_page(new_page_dir_entry[i]);
 
                                     let page = page
                                         .raw()
@@ -203,21 +204,18 @@ impl Table {
                             }),
                         ));
 
-                        let tid = tail_page
-                            .get_column(&mut main_bufferpool.lock(), METADATA_RID)
-                            .slot(tail_slot);
+                        let bp = &mut main_bufferpool.lock();
 
-                        if merged_page.read_page_tps(&mut main_bufferpool.lock()) > tid && tid != 0
-                        {
-                            merged_page.write_page_tps(&mut main_bufferpool.lock(), tid);
+                        let tid = tail_page.get_column(bp, METADATA_RID).slot(tail_slot);
+
+                        if merged_page.read_page_tps(bp) > tid && tid != 0 {
+                            merged_page.write_page_tps(bp, tid);
                         }
 
                         for i in (NUM_STATIC_COLUMNS + 1)..(NUM_METADATA_COLUMNS + num_columns) {
-                            let updated_value = tail_page
-                                .get_column(&mut main_bufferpool.lock(), i)
-                                .slot(tail_slot);
+                            let updated_value = tail_page.get_column(bp, i).slot(tail_slot);
                             merged_page
-                                .get_column(&mut main_bufferpool.lock(), i)
+                                .get_column(bp, i)
                                 .write_slot(RID::from(base_rid).slot(), updated_value);
                         }
                     }
@@ -228,6 +226,7 @@ impl Table {
                 let mut page_dir = page_dir.write();
 
                 for pair in &merged {
+                    println!("Merging page {}", *pair.0);
                     page_dir.replace_page(*pair.0, pair.1);
                 }
 
@@ -302,8 +301,8 @@ impl Table {
         let header = TableHeaderPage {
             num_columns: self.num_columns,
             primary_key_index: self.primary_key_index,
-            next_rid: self.next_rid.load(Ordering::SeqCst),
-            next_tid: self.next_tid.load(Ordering::SeqCst),
+            next_rid: self.next_rid.load(Ordering::Relaxed),
+            next_tid: self.next_tid.load(Ordering::Relaxed),
             next_free_page: self.disk.free_page_pointer(),
             indexed_columns: self.index.index_meta_to_bit_vector(),
         };
@@ -337,7 +336,7 @@ impl Table {
 
             let new_page = self.allocate_tail_page();
 
-            self.get_page_by_id(new_page.current_tail_page.load(Ordering::SeqCst))
+            self.get_page_by_id(new_page.current_tail_page.load(Ordering::Relaxed))
                 .write_last_tail(&mut self.bufferpool.lock(), RID_INVALID);
 
             range_dir.allocate_range(new_page);
@@ -345,10 +344,10 @@ impl Table {
 
         let range = range_dir.get(range_id);
         if range.tail_is_full() {
-            let last_tail_page = range.current_tail_page.load(Ordering::SeqCst);
+            let last_tail_page = range.current_tail_page.load(Ordering::Relaxed);
             let new_tail = self.allocate_tail_page();
 
-            self.get_page_by_id(new_tail.current_tail_page.load(Ordering::SeqCst))
+            self.get_page_by_id(new_tail.current_tail_page.load(Ordering::Relaxed))
                 .write_last_tail(&mut self.bufferpool.lock(), last_tail_page as u64);
 
             range_dir.new_range_tail(range_id, new_tail);
@@ -367,7 +366,7 @@ impl Table {
     pub fn allocate_tail_page(&self) -> PageRange {
         let next_tid: RID = self
             .next_tid
-            .fetch_sub(PAGE_SLOTS as u64, Ordering::SeqCst)
+            .fetch_sub(PAGE_SLOTS as u64, Ordering::Relaxed)
             .into();
 
         let tail_reserve_start = self.disk.reserve_range(self.total_columns());
@@ -413,7 +412,7 @@ impl Table {
             None => {
                 let mut rid: RID = 0.into();
 
-                let next_rid = self.next_rid.load(Ordering::SeqCst);
+                let next_rid = self.next_rid.load(Ordering::Relaxed);
 
                 while rid.raw() < next_rid {
                     let page = self.get_page(rid);
@@ -463,7 +462,7 @@ impl Table {
             None => {
                 let mut rid: RID = 0.into();
                 let mut rids = Vec::new();
-                let next_rid = self.next_rid.load(Ordering::SeqCst);
+                let next_rid = self.next_rid.load(Ordering::Relaxed);
 
                 while rid.raw() < next_rid {
                     let page = self.get_page(rid);
@@ -505,7 +504,7 @@ impl Table {
             None => {
                 let mut rids: Vec<RID> = Vec::new();
                 let mut rid: RID = 0.into();
-                let next_rid = self.next_rid.load(Ordering::SeqCst);
+                let next_rid = self.next_rid.load(Ordering::Relaxed);
 
                 while rid.raw() < next_rid {
                     let key = self
@@ -541,6 +540,20 @@ impl Table {
         let page = self.get_page(rid);
 
         let mut bp = self.bufferpool.lock();
+
+        let indir = page
+            .get_column(bp.borrow_mut(), METADATA_INDIRECTION)
+            .slot(rid.slot());
+
+        if indir == RID_INVALID || page.read_page_tps(bp.borrow_mut()) <= indir {
+            rid
+        } else {
+            indir.into()
+        }
+    }
+
+    pub fn get_latest_with_bp(&self, bp: &mut BufferPool, rid: RID) -> RID {
+        let page = self.get_page(rid);
 
         let indir = page
             .get_column(bp.borrow_mut(), METADATA_INDIRECTION)
@@ -621,18 +634,20 @@ impl Table {
     }
 
     pub fn sum(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
-        self.find_rows_range(column_index, start_range, end_range)
+        let mut bp = self.bufferpool.lock();
+        let mut sum: u64 = 0;
+        for rid in self
+            .find_rows_range(column_index, start_range, end_range)
             .iter()
-            .map(|rid| {
-                let latest = self.get_latest(*rid);
-                self.get_page(latest)
-                    .get_column(
-                        self.bufferpool.lock().borrow_mut(),
-                        NUM_METADATA_COLUMNS + column_index,
-                    )
-                    .slot(latest.slot())
-            })
-            .sum()
+        {
+            let latest = self.get_latest_with_bp(&mut bp, *rid);
+            sum += self
+                .get_page(latest)
+                .get_column(&mut bp, NUM_METADATA_COLUMNS + column_index)
+                .slot(latest.slot());
+        }
+
+        sum
     }
 
     pub fn select(&self, search_value: u64, column_index: usize, columns: &PyList) -> Py<PyList> {
@@ -871,7 +886,7 @@ impl Table {
             return;
         }
 
-        let rid: RID = self.next_rid.fetch_add(1, Ordering::SeqCst).into();
+        let rid: RID = self.next_rid.fetch_add(1, Ordering::Relaxed).into();
 
         let page_dir = self.page_dir.read();
 
@@ -946,7 +961,7 @@ impl Table {
     pub fn build_index(&mut self, column_num: usize) {
         self.index.create_index(column_num);
         let mut rid: RID = 0.into();
-        let max_rid = self.next_rid.load(Ordering::SeqCst);
+        let max_rid = self.next_rid.load(Ordering::Relaxed);
         while rid.raw() < max_rid {
             if self
                 .get_page(rid)
@@ -956,7 +971,7 @@ impl Table {
             {
                 continue;
             }
-            
+
             let latest = self.get_latest(rid);
             self.index.update_index(
                 column_num,
