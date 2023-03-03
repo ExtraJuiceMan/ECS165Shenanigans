@@ -493,6 +493,12 @@ impl Table {
             .map(|val| val.extract::<Option<u64>>().unwrap())
             .collect::<Vec<Option<u64>>>();
 
+        if let Some(pk) = vals[self.primary_key_index] {
+            if self.find_row(self.primary_key_index, pk).is_some() {
+                return false;
+            }
+        }
+
         let row = self.find_row(self.primary_key_index, key);
 
         if row.is_none() {
@@ -622,6 +628,20 @@ impl Table {
 
     #[args(values = "*")]
     pub fn insert(&mut self, values: &PyTuple) {
+        if self
+            .find_row(
+                self.primary_key_index,
+                values
+                    .get_item(self.primary_key_index)
+                    .unwrap()
+                    .extract::<u64>()
+                    .unwrap(),
+            )
+            .is_some()
+        {
+            return;
+        }
+
         let rid: RID = self.next_rid.fetch_add(1, Ordering::SeqCst).into();
 
         let page_dir = self.page_dir.read();
