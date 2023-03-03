@@ -12,6 +12,7 @@ use crate::{
     Record, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS,
 };
 use parking_lot::{lock_api::RawMutex, Mutex, RwLock};
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
 use rkyv::{
@@ -27,6 +28,7 @@ use std::{
     sync::mpsc::{channel, Sender},
     thread::{self, JoinHandle},
 };
+use std::error::Error;
 use std::{
     borrow::BorrowMut,
     mem::size_of,
@@ -503,7 +505,11 @@ impl Table {
             .filter(|(_i, x)| x.extract::<u64>().unwrap() != 0)
             .map(|(i, _x)| i)
             .collect();
-
+        if(column_index >= self.num_columns){
+            return Python::with_gil(|py| ->  Py<PyList> {
+                PyList::empty(py).into()
+            });
+        }
         let vals: Vec<RID> = self.find_rows(column_index, search_value);
 
         Python::with_gil(|py| -> Py<PyList> {
