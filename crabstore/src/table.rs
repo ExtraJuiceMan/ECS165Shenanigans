@@ -21,6 +21,7 @@ use rkyv::{
     Archive, Deserialize, Serialize,
 };
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
+use std::ops::{Bound, Range, RangeBounds, RangeFull, RangeInclusive};
 use std::{
     backtrace::Backtrace,
     borrow::Borrow,
@@ -498,8 +499,12 @@ impl Table {
         }
     }
 
-    fn find_rows_range(&self, column_index: usize, begin: u64, end: u64) -> Vec<RID> {
-        match self.index.range_from_index(column_index, begin, end) {
+    fn find_rows_range(
+        &self,
+        column_index: usize,
+        range: impl RangeBounds<u64> + Clone,
+    ) -> Vec<RID> {
+        match self.index.range_from_index(column_index, range.clone()) {
             Some(vals) => vals,
             None => {
                 let mut rids: Vec<RID> = Vec::new();
@@ -515,7 +520,7 @@ impl Table {
                         )
                         .slot(rid.slot());
 
-                    if key >= begin && key <= end {
+                    if range.contains(&key) {
                         rids.push(rid);
                     }
 
@@ -634,10 +639,10 @@ impl Table {
     }
 
     pub fn sum(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
-        let mut bp = self.bufferpool.lock();
+        let bp = self.bufferpool.lock();
         let mut sum: u64 = 0;
         for rid in self
-            .find_rows_range(column_index, start_range, end_range)
+            .find_rows_range(column_index, RangeInclusive::new(start_range, end_range))
             .iter()
         {
             let latest = self.get_latest_with_bp(&mut bp, *rid);
