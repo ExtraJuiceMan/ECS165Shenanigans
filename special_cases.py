@@ -1,6 +1,6 @@
 from lstore.db import Database
 from lstore.query import Query
-
+from time import sleep
 from random import choice, randint, sample, seed
 
 db = Database()
@@ -48,5 +48,6 @@ for key in records:
 print('test 4 finished')
 
 # test 5: update on no record (primary key does not exist in the table)
-print('successfully updated : ', query.update(90, [1, 1, 1, 1]))
+print('successfully updated : ', query.update(90, *[1, 1, 1, 1]))
 print('test 5 finished')
+db.close()
