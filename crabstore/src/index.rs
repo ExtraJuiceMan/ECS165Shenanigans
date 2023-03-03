@@ -12,7 +12,7 @@ use rkyv::{
 use std::{
     collections::BTreeMap,
     io::{BufWriter, Read, Write},
-    ops::{Bound, RangeInclusive},
+    ops::{Bound, RangeInclusive, Range, RangeBounds},
     path::PathBuf,
 };
 use std::{fs::File, ops::Bound::Included, path::Path};
@@ -153,9 +153,9 @@ impl Index {
             })
     }
 
-    pub fn range_from_index(&self, column_number: usize, begin: u64, end: u64) -> Option<Vec<RID>> {
+    pub fn range_from_index(&self, column_number: usize, range: impl RangeBounds<u64>) -> Option<Vec<RID>> {
         self.indices[column_number].as_ref().map(|map| {
-            map.range((Included(begin), Included(end)))
+            map.range(range)
                 .flat_map(|item| item.1.clone())
                 .collect::<Vec<RID>>()
         })
