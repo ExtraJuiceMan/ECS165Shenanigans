@@ -644,6 +644,77 @@ impl Table {
             })
             .collect()
     }
+    pub fn insert_query(&mut self, values: Vec<u64>) {
+        let rid: RID = self.next_rid.fetch_add(1, Ordering::Relaxed).into();
+
+        let page_dir = self.page_dir.read();
+
+        let page: Arc<[usize]> = match page_dir.get(rid) {
+            None => {
+                drop(page_dir);
+                let mut page_dir = self.page_dir.write();
+                // Check again since unlocking read and acquiring write are not atomic
+                if page_dir.get(rid).is_none() {
+                    let reserve_count = self.total_columns() * PAGE_RANGE_COUNT;
+                    let reserved = self.disk.reserve_range(reserve_count);
+
+                    for i in 0..PAGE_RANGE_COUNT {
+                        let page_id = (rid.page_range() * PAGE_RANGE_COUNT) + i;
+                        let mut column_pages =
+                            Arc::<[usize]>::new_uninit_slice(self.total_columns());
+
+                        let start_offset = reserved + (i * self.total_columns());
+
+                        for (i, x) in
+                            (start_offset..(start_offset + self.total_columns())).enumerate()
+                        {
+                            Arc::get_mut(&mut column_pages).unwrap()[i].write(x);
+                        }
+
+                        let column_pages = unsafe { column_pages.assume_init() };
+
+                        self.bufferpool
+                            .lock()
+                            .get_page(column_pages[METADATA_PAGE_HEADER])
+                            .write_slot(0, RID_INVALID);
+
+                        page_dir.new_page(page_id, column_pages);
+                    }
+                }
+
+                page_dir
+                    .get(rid)
+                    .expect("Allocated new pages but no mapping in directory")
+            }
+            Some(cols) => cols,
+        };
+
+        let page = Page::new(page);
+
+        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
+            .write_slot(rid.slot(), RID_INVALID);
+
+        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
+            .write_slot(rid.slot(), rid.raw());
+
+        page.get_column(
+            self.bufferpool.lock().borrow_mut(),
+            METADATA_SCHEMA_ENCODING,
+        )
+        .write_slot(rid.slot(), 0);
+
+        for (i, val) in values.iter().enumerate() {
+            page.get_column(
+                self.bufferpool.lock().borrow_mut(),
+                NUM_METADATA_COLUMNS + i,
+            )
+            .write_slot(rid.slot(), *val);
+        }
+
+        for i in 0..self.num_columns {
+            self.index.update_index(i, *values.get(i).unwrap(), rid);
+        }
+    }
 }
 
 #[pymethods]
@@ -903,77 +974,11 @@ impl Table {
         {
             return;
         }
-
-        let rid: RID = self.next_rid.fetch_add(1, Ordering::Relaxed).into();
-
-        let page_dir = self.page_dir.read();
-
-        let page: Arc<[usize]> = match page_dir.get(rid) {
-            None => {
-                drop(page_dir);
-                let mut page_dir = self.page_dir.write();
-                // Check again since unlocking read and acquiring write are not atomic
-                if page_dir.get(rid).is_none() {
-                    let reserve_count = self.total_columns() * PAGE_RANGE_COUNT;
-                    let reserved = self.disk.reserve_range(reserve_count);
-
-                    for i in 0..PAGE_RANGE_COUNT {
-                        let page_id = (rid.page_range() * PAGE_RANGE_COUNT) + i;
-                        let mut column_pages =
-                            Arc::<[usize]>::new_uninit_slice(self.total_columns());
-
-                        let start_offset = reserved + (i * self.total_columns());
-
-                        for (i, x) in
-                            (start_offset..(start_offset + self.total_columns())).enumerate()
-                        {
-                            Arc::get_mut(&mut column_pages).unwrap()[i].write(x);
-                        }
-
-                        let column_pages = unsafe { column_pages.assume_init() };
-
-                        self.bufferpool
-                            .lock()
-                            .get_page(column_pages[METADATA_PAGE_HEADER])
-                            .write_slot(0, RID_INVALID);
-
-                        page_dir.new_page(page_id, column_pages);
-                    }
-                }
-
-                page_dir
-                    .get(rid)
-                    .expect("Allocated new pages but no mapping in directory")
-            }
-            Some(cols) => cols,
-        };
-
-        let page = Page::new(page);
-
-        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
-            .write_slot(rid.slot(), RID_INVALID);
-
-        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
-            .write_slot(rid.slot(), rid.raw());
-
-        page.get_column(
-            self.bufferpool.lock().borrow_mut(),
-            METADATA_SCHEMA_ENCODING,
-        )
-        .write_slot(rid.slot(), 0);
-
-        for (i, val) in values.iter().enumerate() {
-            page.get_column(
-                self.bufferpool.lock().borrow_mut(),
-                NUM_METADATA_COLUMNS + i,
-            )
-            .write_slot(rid.slot(), val.extract().unwrap());
-        }
-
-        for i in 0..self.num_columns {
-            self.index
-                .update_index(i, values.get_item(i).unwrap().extract().unwrap(), rid);
-        }
+        let vals = values
+            .iter()
+            .map(|v| v.extract::<u64>().unwrap())
+            .collect::<Vec<u64>>();
+        self.insert_query(vals);
     }
 
     pub fn build_index(&mut self, column_num: usize) {
