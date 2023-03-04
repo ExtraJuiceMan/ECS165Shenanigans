@@ -13,7 +13,7 @@ use std::os::windows::prelude::FileExt;
 
 use parking_lot::Mutex;
 
-use crate::{page::PhysicalPage, PAGE_SIZE};
+use crate::PAGE_SIZE;
 
 pub struct DiskManager {
     file: Mutex<File>,

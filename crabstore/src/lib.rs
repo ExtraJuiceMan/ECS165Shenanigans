@@ -2,24 +2,18 @@
 #![feature(map_try_insert)]
 #![feature(get_mut_unchecked)]
 
-use core::fmt;
-use pyo3::{
-    prelude::*,
-    types::{PyList, PyTuple},
-};
+use pyo3::{prelude::*, types::PyList};
 use rkyv::ser::{
     serializers::{AllocScratch, CompositeSerializer, SharedSerializeMap, WriteSerializer},
     Serializer,
 };
+use std::collections::HashMap;
 use std::{
-    borrow::Borrow,
-    cell::RefCell,
     fs::{self, File},
     io::{self, BufWriter, Read, Write},
     mem::size_of,
     path::{Path, PathBuf},
 };
-use std::{collections::BTreeMap, collections::HashMap};
 const PAGE_SIZE: usize = 4096;
 const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
 const PAGE_RANGE_COUNT: usize = 16;
@@ -50,9 +44,7 @@ mod page_directory;
 mod range_directory;
 pub mod rid;
 pub mod table;
-use crate::index::Index;
-use crate::page::{Page, PageRange, PhysicalPage};
-use crate::rid::RID;
+
 use crate::table::Table;
 #[derive(Clone, Debug)]
 #[pyclass(subclass, get_all)]
@@ -238,7 +230,7 @@ impl CrabStore {
     }
 
     pub fn open(&mut self, path: String) {
-        fs::create_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
         self.directory = Some(Path::new(&path).into());
         let crab_file = File::options().read(true).open(self.database_filename());
 
@@ -255,7 +247,7 @@ impl CrabStore {
         let mut crab_file = crab_file.unwrap();
 
         let mut crab_bytes = Vec::new();
-        crab_file.read_to_end(&mut crab_bytes);
+        crab_file.read_to_end(&mut crab_bytes).unwrap();
 
         let table_names = unsafe {
             rkyv::from_bytes_unchecked::<Vec<String>>(&crab_bytes)
@@ -303,7 +295,7 @@ impl CrabStore {
 
         let (buf, _, _) = serializer.into_components();
 
-        buf.into_inner().flush();
+        buf.into_inner().flush().unwrap();
 
         for table in self.tables.values() {
             Python::with_gil(|py| table.borrow_mut(py).persist())

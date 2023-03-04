@@ -1,8 +1,7 @@
 use crate::{
     bufferpool::BufferPool, disk_manager::DiskManager, page::PhysicalPage,
     range_directory::RangeDirectory, rid::RID, BUFFERPOOL_SIZE, METADATA_BASE_RID,
-    METADATA_PAGE_HEADER, NUM_STATIC_COLUMNS, PAGE_RANGE_COUNT, PAGE_RANGE_SIZE, PAGE_SIZE,
-    PAGE_SLOTS,
+    METADATA_PAGE_HEADER, NUM_STATIC_COLUMNS, PAGE_RANGE_COUNT, PAGE_SIZE, PAGE_SLOTS,
 };
 use crate::{index::Index, RID_INVALID};
 use crate::{
@@ -13,8 +12,7 @@ use crate::{
     Record, RecordRust, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING,
     NUM_METADATA_COLUMNS,
 };
-use parking_lot::{lock_api::RawMutex, Mutex, RwLock};
-use pyo3::exceptions::PyTypeError;
+use parking_lot::{Mutex, RwLock};
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
 use rkyv::{
@@ -22,16 +20,7 @@ use rkyv::{
     Archive, Deserialize, Serialize,
 };
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
-use std::ops::{Bound, Range, RangeBounds, RangeFull, RangeInclusive};
-use std::{
-    backtrace::Backtrace,
-    borrow::Borrow,
-    collections::HashSet,
-    hash::BuildHasherDefault,
-    slice::SliceIndex,
-    sync::mpsc::{channel, Sender},
-    thread::{self, JoinHandle},
-};
+use std::ops::{RangeBounds, RangeInclusive};
 use std::{
     borrow::BorrowMut,
     mem::size_of,
@@ -41,7 +30,11 @@ use std::{
         Arc,
     },
 };
-use std::{error::Error, io::Read};
+use std::{
+    hash::BuildHasherDefault,
+    sync::mpsc::{channel, Sender},
+    thread::{self, JoinHandle},
+};
 
 #[derive(Archive, Deserialize, Serialize, Clone, Debug)]
 pub struct TableHeaderPage {
@@ -82,7 +75,7 @@ impl Table {
         let main_bp_clone = Arc::clone(main_bufferpool);
         let (send, recv) = channel();
         let handle = thread::spawn(move || {
-            let copy_mask = (0b111);
+            let copy_mask = 0b111;
             let num_columns = num_columns;
             let main_bufferpool = main_bp_clone;
             let page_dir = page_dir_clone;
@@ -633,7 +626,7 @@ impl Table {
                     )
                     .slot(rid.slot());
 
-                let mut record = RecordRust {
+                let record = RecordRust {
                     rid: original_rid,
                     indirection,
                     schema_encoding: schema,
@@ -789,7 +782,6 @@ impl Table {
             .map(|(i, _x)| i)
             .collect();
 
-        let vals: Vec<RID> = self.find_rows(column_index, search_value);
         let results = self.select_query(search_value, column_index, &included_columns);
         Python::with_gil(|py| -> Py<PyList> {
             let selected_records: Py<PyList> = PyList::empty(py).into();
