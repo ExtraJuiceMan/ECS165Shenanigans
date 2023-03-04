@@ -10,7 +10,8 @@ use crate::{
     page_directory::PageDirectory,
 };
 use crate::{
-    Record, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS,
+    Record, RecordRust, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING,
+    NUM_METADATA_COLUMNS,
 };
 use parking_lot::{lock_api::RawMutex, Mutex, RwLock};
 use pyo3::exceptions::PyTypeError;
@@ -593,6 +594,56 @@ impl Table {
     pub fn total_columns(&self) -> usize {
         NUM_METADATA_COLUMNS + self.num_columns
     }
+    pub fn select_query(
+        &self,
+        search_value: u64,
+        column_index: usize,
+        included_columns: &Vec<usize>,
+    ) -> Vec<RecordRust> {
+        let vals: Vec<RID> = self.find_rows(column_index, search_value);
+
+        vals.into_iter()
+            .map(|rid| {
+                let rid = self.get_latest(rid);
+                let page = self.get_page(rid);
+
+                let result_cols = included_columns
+                    .iter()
+                    .map(|i| {
+                        page.get_column(
+                            self.bufferpool.lock().borrow_mut(),
+                            NUM_METADATA_COLUMNS + i,
+                        )
+                        .slot(rid.slot())
+                    })
+                    .collect::<Vec<u64>>();
+
+                let original_rid = page
+                    .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
+                    .slot(rid.slot());
+
+                let indirection = page
+                    .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
+                    .slot(rid.slot());
+
+                let schema = page
+                    .get_column(
+                        self.bufferpool.lock().borrow_mut(),
+                        METADATA_SCHEMA_ENCODING,
+                    )
+                    .slot(rid.slot());
+
+                let mut record = RecordRust {
+                    rid: original_rid,
+                    indirection,
+                    schema_encoding: schema,
+                    columns: result_cols,
+                };
+
+                record
+            })
+            .collect()
+    }
 }
 
 #[pymethods]
@@ -639,7 +690,7 @@ impl Table {
     }
 
     pub fn sum(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
-        let bp = self.bufferpool.lock();
+        let mut bp = self.bufferpool.lock();
         let mut sum: u64 = 0;
         for rid in self
             .find_rows_range(column_index, RangeInclusive::new(start_range, end_range))
@@ -668,51 +719,13 @@ impl Table {
             .collect();
 
         let vals: Vec<RID> = self.find_rows(column_index, search_value);
-
+        let results = self.select_query(search_value, column_index, &included_columns);
         Python::with_gil(|py| -> Py<PyList> {
             let selected_records: Py<PyList> = PyList::empty(py).into();
-
-            for rid in vals {
-                let result_cols = PyList::empty(py);
-                let rid = self.get_latest(rid);
-                let page = self.get_page(rid);
-
-                for i in included_columns.iter() {
-                    result_cols
-                        .append(
-                            page.get_column(
-                                self.bufferpool.lock().borrow_mut(),
-                                NUM_METADATA_COLUMNS + i,
-                            )
-                            .slot(rid.slot()),
-                        )
-                        .expect("Failed to append to python list");
-                }
-
-                let original_rid = page
-                    .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
-                    .slot(rid.slot());
-
-                let indirection = page
-                    .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
-                    .slot(rid.slot());
-
-                let schema = page
-                    .get_column(
-                        self.bufferpool.lock().borrow_mut(),
-                        METADATA_SCHEMA_ENCODING,
-                    )
-                    .slot(rid.slot());
-
-                let record = PyCell::new(
-                    py,
-                    Record::new(original_rid, indirection, schema, result_cols.into()),
-                )
-                .unwrap();
-
+            for result in results {
                 selected_records
                     .as_ref(py)
-                    .append(record)
+                    .append(Record::from(&result, py).into_py(py))
                     .expect("Failed to append to python list");
             }
             selected_records

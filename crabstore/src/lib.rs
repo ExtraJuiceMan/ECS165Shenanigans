@@ -56,13 +56,56 @@ use crate::rid::RID;
 use crate::table::Table;
 #[derive(Clone, Debug)]
 #[pyclass(subclass, get_all)]
-struct Record {
+pub struct Record {
     rid: u64,
     indirection: u64,
     schema_encoding: u64,
     columns: Py<PyList>,
 }
-
+pub struct RecordRust {
+    rid: u64,
+    indirection: u64,
+    schema_encoding: u64,
+    columns: Vec<u64>,
+}
+impl RecordRust {
+    pub fn new(rid: u64, indirection: u64, schema_encoding: u64, columns: Vec<u64>) -> Self {
+        RecordRust {
+            rid,
+            indirection,
+            schema_encoding,
+            columns,
+        }
+    }
+    pub fn from(record: Record) -> Self {
+        let mut p = Vec::new();
+        Python::with_gil(|py| {
+            for c in record.columns.as_ref(py).iter() {
+                p.push(c.extract::<u64>().unwrap());
+            }
+        });
+        RecordRust {
+            rid: record.rid,
+            indirection: record.indirection,
+            schema_encoding: record.schema_encoding,
+            columns: p,
+        }
+    }
+}
+impl Record {
+    pub fn from(record: &RecordRust, py: Python) -> Self {
+        let result_cols = PyList::empty(py);
+        for c in record.columns.iter() {
+            result_cols.append(c).unwrap();
+        }
+        Record::new(
+            record.rid,
+            record.indirection,
+            record.schema_encoding,
+            result_cols.into(),
+        )
+    }
+}
 #[pymethods]
 impl Record {
     #[new]
