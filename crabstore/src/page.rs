@@ -21,6 +21,7 @@ use std::{
     },
 };
 
+#[derive(Debug)]
 pub struct PhysicalPage {
     pub page: [u8; crate::PAGE_SIZE],
 }

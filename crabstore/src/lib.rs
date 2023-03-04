@@ -26,7 +26,7 @@ const PAGE_RANGE_COUNT: usize = 16;
 const PAGE_RANGE_SIZE: usize = PAGE_SIZE * PAGE_RANGE_COUNT;
 const RANGE_PAGE_COUNT: usize = PAGE_RANGE_SIZE / PAGE_SIZE;
 
-const NUM_METADATA_COLUMNS: usize = 6;
+const NUM_METADATA_COLUMNS: usize = 5;
 
 const METADATA_INDIRECTION: usize = 0;
 const METADATA_RID: usize = 1;
@@ -35,8 +35,8 @@ const METADATA_BASE_RID: usize = 2;
 const NUM_STATIC_COLUMNS: usize = 3;
 
 const METADATA_PAGE_HEADER: usize = 3;
-const METADATA_TIMESTAMP: usize = 4;
-const METADATA_SCHEMA_ENCODING: usize = 5;
+//const METADATA_TIMESTAMP: usize = 4;
+const METADATA_SCHEMA_ENCODING: usize = 4;
 // 0xFF...FF
 const RID_INVALID: u64 = !0;
 

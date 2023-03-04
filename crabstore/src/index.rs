@@ -157,9 +157,7 @@ impl Index {
         self.indices[column_number].as_ref().map(|map| {
             map.range(range)
                 .flat_map(|item| item.1.clone())
-                .collect::<Vec<RID>>();
-
-            m
+                .collect::<Vec<RID>>()
         })
     }
 

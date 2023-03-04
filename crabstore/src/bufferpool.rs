@@ -14,6 +14,7 @@ use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::{disk_manager::DiskManager, page::PhysicalPage};
 
+#[derive(Debug)]
 pub struct BufferPoolFrame {
     page_id: atomic::AtomicUsize,
     dirty: atomic::AtomicBool,
@@ -123,7 +124,11 @@ impl BufferPool {
 
     pub fn flush_all(&mut self) {
         for i in 0..self.size {
-            if self.frames[i].dirty.load(Ordering::Relaxed) {
+            if self.frames[i].dirty.load(Ordering::Relaxed)
+                && Arc::strong_count(&self.frames[i]) < 2
+            {
+                self.page_frame_map
+                    .remove(&self.frames[i].page_id.load(Ordering::Relaxed));
                 self.frames[i].flush(self.disk.borrow());
             }
         }
@@ -147,6 +152,16 @@ impl BufferPool {
 
     pub fn is_page_mapped(&self, page_id: usize) -> bool {
         self.page_frame_map.contains_key(&page_id)
+    }
+
+    pub fn nuke(&mut self) {
+        for frame in self.frames.iter() {
+            frame.dirty.store(false, Ordering::Relaxed);
+            let old_id = frame.page_id.swap(!0, Ordering::Relaxed);
+            self.page_frame_map.remove(&old_id);
+        }
+
+        self.clock_hand = 0;
     }
 
     pub fn new_page(&mut self) -> Arc<BufferPoolFrame> {
