@@ -1,6 +1,5 @@
 use crate::rid::RID;
 use core::fmt;
-use core::ops::Bound::Excluded;
 use pyo3::prelude::*;
 use rkyv::{
     de::deserializers::SharedDeserializeMap,
@@ -13,10 +12,10 @@ use rkyv::{
 use std::{
     collections::BTreeMap,
     io::{BufWriter, Read, Write},
-    ops::{Bound, RangeInclusive, Range, RangeBounds},
+    ops::RangeBounds,
     path::PathBuf,
 };
-use std::{fs::File, ops::Bound::Included, path::Path};
+use std::{fs::File, path::Path};
 
 #[derive(Clone, Debug, Default)]
 #[pyclass(subclass)]
@@ -28,7 +27,7 @@ pub struct Index {
 impl fmt::Display for Index {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for (i, v) in self.indices.iter().enumerate() {
-            write!(f, "Index on Column {}:\n", i);
+            write!(f, "Index on Column {}:\n", i).unwrap();
             match v {
                 Some(v) => {
                     for (key, value) in v.iter() {
@@ -36,7 +35,7 @@ impl fmt::Display for Index {
                     }
                 }
                 None => {
-                    write!(f, "None\n");
+                    write!(f, "None\n").unwrap();
                 }
             }
         }
@@ -126,6 +125,7 @@ impl Index {
 
     pub fn update_index(&mut self, column_number: usize, value: u64, rid: RID) {
         if let Some(ref mut index) = self.indices[column_number] {
+            println!("Updating index {column_number}");
             if let Some(ref mut rids) = index.get_mut(&value) {
                 rids.push(rid);
             } else {
@@ -153,7 +153,11 @@ impl Index {
             })
     }
 
-    pub fn range_from_index(&self, column_number: usize, range: impl RangeBounds<u64>) -> Option<Vec<RID>> {
+    pub fn range_from_index(
+        &self,
+        column_number: usize,
+        range: impl RangeBounds<u64>,
+    ) -> Option<Vec<RID>> {
         self.indices[column_number].as_ref().map(|map| {
             map.range(range)
                 .flat_map(|item| item.1.clone())

@@ -5,7 +5,7 @@ use crate::{
     range_directory::RangeDirectory,
     rid::RID,
     BUFFERPOOL_SIZE, METADATA_BASE_RID, METADATA_PAGE_HEADER, NUM_STATIC_COLUMNS, PAGE_RANGE_COUNT,
-    PAGE_RANGE_SIZE, PAGE_SIZE, PAGE_SLOTS,
+    PAGE_SIZE, PAGE_SLOTS,
 };
 use crate::{index::Index, RID_INVALID};
 use crate::{
@@ -13,10 +13,10 @@ use crate::{
     page_directory::PageDirectory,
 };
 use crate::{
-    Record, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS,
+    Record, RecordRust, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING,
+    NUM_METADATA_COLUMNS,
 };
-use parking_lot::{lock_api::RawMutex, Mutex, RwLock};
-use pyo3::exceptions::PyTypeError;
+use parking_lot::{Mutex, RwLock};
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
 use rkyv::{
@@ -24,16 +24,7 @@ use rkyv::{
     Archive, Deserialize, Serialize,
 };
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
-use std::ops::{Bound, Range, RangeBounds, RangeFull, RangeInclusive};
-use std::{
-    backtrace::Backtrace,
-    borrow::Borrow,
-    collections::HashSet,
-    hash::BuildHasherDefault,
-    slice::SliceIndex,
-    sync::mpsc::{channel, Sender},
-    thread::{self, JoinHandle},
-};
+use std::ops::{RangeBounds, RangeInclusive};
 use std::{
     borrow::BorrowMut,
     mem::size_of,
@@ -43,7 +34,11 @@ use std::{
         Arc,
     },
 };
-use std::{error::Error, io::Read};
+use std::{
+    hash::BuildHasherDefault,
+    sync::mpsc::{channel, Sender},
+    thread::{self, JoinHandle},
+};
 
 #[derive(Archive, Deserialize, Serialize, Clone, Debug)]
 pub struct TableHeaderPage {
@@ -84,7 +79,7 @@ impl Table {
         let main_bp_clone = Arc::clone(main_bufferpool);
         let (send, recv) = channel();
         let handle = thread::spawn(move || {
-            let copy_mask = (0b111);
+            let copy_mask = 0b111;
             let num_columns = num_columns;
             let main_bufferpool = main_bp_clone;
 
@@ -617,6 +612,127 @@ impl Table {
     pub fn total_columns(&self) -> usize {
         NUM_METADATA_COLUMNS + self.num_columns
     }
+    pub fn select_query(
+        &self,
+        search_value: u64,
+        column_index: usize,
+        included_columns: &Vec<usize>,
+    ) -> Vec<RecordRust> {
+        let vals: Vec<RID> = self.find_rows(column_index, search_value);
+
+        vals.into_iter()
+            .map(|rid| {
+                let rid = self.get_latest(rid);
+                let page = self.get_page(rid);
+
+                let result_cols = included_columns
+                    .iter()
+                    .map(|i| {
+                        page.get_column(
+                            self.bufferpool.lock().borrow_mut(),
+                            NUM_METADATA_COLUMNS + i,
+                        )
+                        .slot(rid.slot())
+                    })
+                    .collect::<Vec<u64>>();
+
+                let original_rid = page
+                    .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
+                    .slot(rid.slot());
+
+                let indirection = page
+                    .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
+                    .slot(rid.slot());
+
+                let schema = page
+                    .get_column(
+                        self.bufferpool.lock().borrow_mut(),
+                        METADATA_SCHEMA_ENCODING,
+                    )
+                    .slot(rid.slot());
+
+                let record = RecordRust {
+                    rid: original_rid,
+                    indirection,
+                    schema_encoding: schema,
+                    columns: result_cols,
+                };
+
+                record
+            })
+            .collect()
+    }
+    pub fn insert_query(&mut self, values: Vec<u64>) {
+        let rid: RID = self.next_rid.fetch_add(1, Ordering::Relaxed).into();
+
+        let page_dir = self.page_dir.read();
+
+        let page: Arc<[usize]> = match page_dir.get(rid) {
+            None => {
+                drop(page_dir);
+                let mut page_dir = self.page_dir.write();
+                // Check again since unlocking read and acquiring write are not atomic
+                if page_dir.get(rid).is_none() {
+                    let reserve_count = self.total_columns() * PAGE_RANGE_COUNT;
+                    let reserved = self.disk.reserve_range(reserve_count);
+
+                    for i in 0..PAGE_RANGE_COUNT {
+                        let page_id = (rid.page_range() * PAGE_RANGE_COUNT) + i;
+                        let mut column_pages =
+                            Arc::<[usize]>::new_uninit_slice(self.total_columns());
+
+                        let start_offset = reserved + (i * self.total_columns());
+
+                        for (i, x) in
+                            (start_offset..(start_offset + self.total_columns())).enumerate()
+                        {
+                            Arc::get_mut(&mut column_pages).unwrap()[i].write(x);
+                        }
+
+                        let column_pages = unsafe { column_pages.assume_init() };
+
+                        self.bufferpool
+                            .lock()
+                            .get_page(column_pages[METADATA_PAGE_HEADER])
+                            .write_slot(0, RID_INVALID);
+
+                        page_dir.new_page(page_id, column_pages);
+                    }
+                }
+
+                page_dir
+                    .get(rid)
+                    .expect("Allocated new pages but no mapping in directory")
+            }
+            Some(cols) => cols,
+        };
+
+        let page = Page::new(page);
+
+        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
+            .write_slot(rid.slot(), RID_INVALID);
+
+        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
+            .write_slot(rid.slot(), rid.raw());
+
+        page.get_column(
+            self.bufferpool.lock().borrow_mut(),
+            METADATA_SCHEMA_ENCODING,
+        )
+        .write_slot(rid.slot(), 0);
+
+        for (i, val) in values.iter().enumerate() {
+            page.get_column(
+                self.bufferpool.lock().borrow_mut(),
+                NUM_METADATA_COLUMNS + i,
+            )
+            .write_slot(rid.slot(), *val);
+        }
+
+        for i in 0..self.num_columns {
+            self.index.update_index(i, *values.get(i).unwrap(), rid);
+        }
+    }
 }
 
 #[pymethods]
@@ -663,16 +779,16 @@ impl Table {
     }
 
     pub fn sum(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
-        let mut bp = &mut self.bufferpool.lock();
+        let mut bp = self.bufferpool.lock();
         let mut sum: u64 = 0;
         for rid in self
             .find_rows_range(column_index, RangeInclusive::new(start_range, end_range))
             .iter()
         {
-            let latest = self.get_latest_with_bp(bp, *rid);
+            let latest = self.get_latest_with_bp(&mut bp, *rid);
             sum += self
                 .get_page(latest)
-                .get_column(bp, NUM_METADATA_COLUMNS + column_index)
+                .get_column(&mut bp, NUM_METADATA_COLUMNS + column_index)
                 .slot(latest.slot());
         }
 
@@ -691,52 +807,13 @@ impl Table {
             .map(|(i, _x)| i)
             .collect();
 
-        let vals: Vec<RID> = self.find_rows(column_index, search_value);
-
+        let results = self.select_query(search_value, column_index, &included_columns);
         Python::with_gil(|py| -> Py<PyList> {
             let selected_records: Py<PyList> = PyList::empty(py).into();
-
-            for rid in vals {
-                let result_cols = PyList::empty(py);
-                let rid = self.get_latest(rid);
-                let page = self.get_page(rid);
-
-                for i in included_columns.iter() {
-                    result_cols
-                        .append(
-                            page.get_column(
-                                self.bufferpool.lock().borrow_mut(),
-                                NUM_METADATA_COLUMNS + i,
-                            )
-                            .slot(rid.slot()),
-                        )
-                        .expect("Failed to append to python list");
-                }
-
-                let original_rid = page
-                    .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
-                    .slot(rid.slot());
-
-                let indirection = page
-                    .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
-                    .slot(rid.slot());
-
-                let schema = page
-                    .get_column(
-                        self.bufferpool.lock().borrow_mut(),
-                        METADATA_SCHEMA_ENCODING,
-                    )
-                    .slot(rid.slot());
-
-                let record = PyCell::new(
-                    py,
-                    Record::new(original_rid, indirection, schema, result_cols.into()),
-                )
-                .unwrap();
-
+            for result in results {
                 selected_records
                     .as_ref(py)
-                    .append(record)
+                    .append(Record::from(&result, py).into_py(py))
                     .expect("Failed to append to python list");
             }
             selected_records
@@ -914,77 +991,11 @@ impl Table {
         {
             return;
         }
-
-        let rid: RID = self.next_rid.fetch_add(1, Ordering::Relaxed).into();
-
-        let page_dir = self.page_dir.read();
-
-        let page: Arc<[usize]> = match page_dir.get(rid) {
-            None => {
-                drop(page_dir);
-                let mut page_dir = self.page_dir.write();
-                // Check again since unlocking read and acquiring write are not atomic
-                if page_dir.get(rid).is_none() {
-                    let reserve_count = self.total_columns() * PAGE_RANGE_COUNT;
-                    let reserved = self.disk.reserve_range(reserve_count);
-
-                    for i in 0..PAGE_RANGE_COUNT {
-                        let page_id = (rid.page_range() * PAGE_RANGE_COUNT) + i;
-                        let mut column_pages =
-                            Arc::<[usize]>::new_uninit_slice(self.total_columns());
-
-                        let start_offset = reserved + (i * self.total_columns());
-
-                        for (i, x) in
-                            (start_offset..(start_offset + self.total_columns())).enumerate()
-                        {
-                            Arc::get_mut(&mut column_pages).unwrap()[i].write(x);
-                        }
-
-                        let column_pages = unsafe { column_pages.assume_init() };
-
-                        self.bufferpool
-                            .lock()
-                            .get_page(column_pages[METADATA_PAGE_HEADER])
-                            .write_slot(0, RID_INVALID);
-
-                        page_dir.new_page(page_id, column_pages);
-                    }
-                }
-
-                page_dir
-                    .get(rid)
-                    .expect("Allocated new pages but no mapping in directory")
-            }
-            Some(cols) => cols,
-        };
-
-        let page = Page::new(page);
-
-        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
-            .write_slot(rid.slot(), RID_INVALID);
-
-        page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
-            .write_slot(rid.slot(), rid.raw());
-
-        page.get_column(
-            self.bufferpool.lock().borrow_mut(),
-            METADATA_SCHEMA_ENCODING,
-        )
-        .write_slot(rid.slot(), 0);
-
-        for (i, val) in values.iter().enumerate() {
-            page.get_column(
-                self.bufferpool.lock().borrow_mut(),
-                NUM_METADATA_COLUMNS + i,
-            )
-            .write_slot(rid.slot(), val.extract().unwrap());
-        }
-
-        for i in 0..self.num_columns {
-            self.index
-                .update_index(i, values.get_item(i).unwrap().extract().unwrap(), rid);
-        }
+        let vals = values
+            .iter()
+            .map(|v| v.extract::<u64>().unwrap())
+            .collect::<Vec<u64>>();
+        self.insert_query(vals);
     }
 
     pub fn build_index(&mut self, column_num: usize) {

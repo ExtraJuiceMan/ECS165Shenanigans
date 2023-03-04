@@ -1,12 +1,11 @@
 use crate::{page::PageRange, rid::RID};
 use rkyv::{
-    collections::ArchivedHashMap,
-    de::{deserializers::SharedDeserializeMap, SharedDeserializeRegistry},
+    de::deserializers::SharedDeserializeMap,
     ser::{
         serializers::{AllocScratch, CompositeSerializer, SharedSerializeMap, WriteSerializer},
         Serializer,
     },
-    Archive, Deserialize, Serialize,
+    Deserialize,
 };
 
 use std::{

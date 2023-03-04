@@ -1,24 +1,18 @@
 use std::{
-    borrow::Borrow,
-    collections::HashMap,
     fs::File,
-    hash::{BuildHasher, BuildHasherDefault},
-    io::{BufReader, BufWriter, Read, Write},
-    ops::RangeBounds,
+    hash::BuildHasherDefault,
+    io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
-    rc::Rc,
-    slice::SliceIndex,
     sync::Arc,
 };
 
 use rkyv::{
-    collections::ArchivedHashMap,
-    de::{deserializers::SharedDeserializeMap, SharedDeserializeRegistry},
+    de::deserializers::SharedDeserializeMap,
     ser::{
         serializers::{AllocScratch, CompositeSerializer, SharedSerializeMap, WriteSerializer},
         Serializer,
     },
-    Archive, Deserialize, Serialize,
+    Deserialize,
 };
 use rustc_hash::{FxHashMap, FxHasher};
 

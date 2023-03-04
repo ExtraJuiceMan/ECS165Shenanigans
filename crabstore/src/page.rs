@@ -1,20 +1,12 @@
-use parking_lot::{lock_api::RwLock, Mutex};
 use rkyv::{Archive, Deserialize, Serialize};
 
 use crate::{
     bufferpool::{BufferPool, BufferPoolFrame},
-    rid::{self, RID},
-    METADATA_INDIRECTION, METADATA_PAGE_HEADER, METADATA_RID, METADATA_SCHEMA_ENCODING,
-    NUM_METADATA_COLUMNS, PAGE_SLOTS,
+    rid::RID,
+    METADATA_PAGE_HEADER,
 };
 use std::{
-    any::TypeId,
-    borrow::{Borrow, BorrowMut},
-    cell::RefCell,
-    collections::btree_map::Values,
-    fmt::Display,
     mem::size_of,
-    rc::Rc,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
