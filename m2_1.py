@@ -27,7 +27,8 @@ seed(3562901)
 
 for i in range(0, number_of_records):
     key = 92106429 + i
-    records[key] = [key, randint(0, 20), randint(0, 20), randint(0, 20), randint(0, 20)]
+    records[key] = [key, randint(0, 20), randint(
+        0, 20), randint(0, 20), randint(0, 20)]
     query.insert(*records[key])
 keys = sorted(list(records.keys()))
 print("Insert finished")
@@ -65,7 +66,8 @@ for _ in range(number_of_updates):
                 if column != records[key][j]:
                     error = True
             if error:
-                print('update error on', original, 'and', updated_columns, ':', record, ', correct:', records[key])
+                print('update error on', original, 'and', updated_columns,
+                      ':', record, ', correct:', records[key])
             else:
                 pass
                 # print('update on', original, 'and', updated_columns, ':', record)
@@ -77,7 +79,8 @@ for i in range(0, number_of_aggregates):
     column_sum = sum(map(lambda key: records[key][0], keys[r[0]: r[1] + 1]))
     result = query.sum(keys[r[0]], keys[r[1]], 0)
     if column_sum != result:
-        print('sum error on [', keys[r[0]], ',', keys[r[1]], ']: ', result, ', correct: ', column_sum)
+        print('sum error on [', keys[r[0]], ',', keys[r[1]],
+              ']: ', result, ', correct: ', column_sum)
     else:
         pass
         # print('sum on [', keys[r[0]], ',', keys[r[1]], ']: ', column_sum)

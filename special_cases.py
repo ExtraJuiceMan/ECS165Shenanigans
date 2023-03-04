@@ -31,8 +31,6 @@ print("Insert finished")
 # test 1: select on non-primary columns with index
 
 
-
-
 # test 2: select on non-primary columns without index
 
 # test 3: select that returns multiple records

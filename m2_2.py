@@ -7,6 +7,7 @@ db = Database()
 db.open('./ECS165')
 
 # Getting the existing Grades table
+grades_table = db.create_table('Grades', 5, 0)
 grades_table = db.get_table('Grades')
 
 # create a query class for the grades table
@@ -22,7 +23,8 @@ number_of_updates = 10
 seed(3562901)
 for i in range(0, number_of_records):
     key = 92106429 + i
-    records[key] = [key, randint(0, 20), randint(0, 20), randint(0, 20), randint(0, 20)]
+    records[key] = [key, randint(0, 20), randint(
+        0, 20), randint(0, 20), randint(0, 20)]
 
 # Simulate updates
 keys = sorted(list(records.keys()))
@@ -47,10 +49,12 @@ print("Select finished")
 
 for i in range(0, number_of_aggregates):
     r = sorted(sample(range(0, len(keys)), 2))
-    column_sum = sum(map(lambda x: records[x][0] if x in records else 0, keys[r[0]: r[1] + 1]))
+    column_sum = sum(
+        map(lambda x: records[x][0] if x in records else 0, keys[r[0]: r[1] + 1]))
     result = query.sum(keys[r[0]], keys[r[1]], 0)
     if column_sum != result:
-        print('sum error on [', keys[r[0]], ',', keys[r[1]], ']: ', result, ', correct: ', column_sum)
+        print('sum error on [', keys[r[0]], ',', keys[r[1]],
+              ']: ', result, ', correct: ', column_sum)
 print("Aggregate finished")
 
 deleted_keys = sample(keys, 100)

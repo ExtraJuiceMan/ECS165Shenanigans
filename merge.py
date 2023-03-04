@@ -12,7 +12,7 @@ except:
 db = Database()
 db.open('./lulzz')
 
-grades_table = db.create_table('lolzz',4,0)
+grades_table = db.create_table('lolzz', 4, 0)
 query = Query(grades_table)
 records = {}
 
@@ -54,7 +54,8 @@ for key in keys:
             if column != records[key][j]:
                 error = True
         if error:
-            print('update error on', original, 'and', updated_columns, ':', record, ', correct:', records[key])
+            print('update error on', original, 'and', updated_columns,
+                  ':', record, ', correct:', records[key])
         else:
             pass
             # print('update on', original, 'and', updated_columns, ':', record)
@@ -73,4 +74,3 @@ for key in keys:
         pass
         # print('select on', key, ':', record)
 print("Select finished")
-    
