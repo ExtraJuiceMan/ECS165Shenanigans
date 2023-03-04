@@ -5,6 +5,7 @@ use std::{
         atomic::{self, Ordering},
         Arc, RwLock,
     },
+    time::Duration,
 };
 
 use rustc_hash::{FxHashMap, FxHasher};
@@ -26,7 +27,6 @@ impl BufferPoolFrame {
             page: RwLock::new(PhysicalPage::default()),
         }
     }
-
     pub fn flush(&self, disk: &DiskManager) {
         let page = self
             .page
@@ -102,12 +102,16 @@ impl BufferPool {
     }
 
     fn find_evict_victim(&mut self) -> usize {
+        let evict_start_time = std::time::Instant::now();
         let victim = loop {
             if self.clock_refs[self.clock_hand]
                 || Arc::strong_count(&self.frames[self.clock_hand]) > 1
             {
                 self.clock_refs[self.clock_hand] = false;
                 self.clock_hand = (self.clock_hand + 1) % self.size;
+                if Duration::from_secs(1) < evict_start_time.elapsed() {
+                    panic!("Evicting a page took more than 1 second! Buffer pool is too small!");
+                }
                 continue;
             }
 
