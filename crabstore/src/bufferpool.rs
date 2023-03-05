@@ -53,6 +53,7 @@ impl BufferPoolFrame {
             .page
             .read()
             .expect("Couldn't lock physical page, poisoned?");
+
         page.slot(slot)
     }
 
@@ -62,6 +63,7 @@ impl BufferPoolFrame {
             .page
             .write()
             .expect("Couldn't lock physical page, poisoned?");
+
         page.write_slot(slot, value);
     }
 
@@ -153,16 +155,6 @@ impl BufferPool {
 
     pub fn is_page_mapped(&self, page_id: usize) -> bool {
         self.page_frame_map.contains_key(&page_id)
-    }
-
-    pub fn nuke(&mut self) {
-        for frame in self.frames.iter() {
-            frame.dirty.store(false, Ordering::Relaxed);
-            let old_id = frame.page_id.swap(!0, Ordering::Relaxed);
-            self.page_frame_map.remove(&old_id);
-        }
-
-        self.clock_hand = 0;
     }
 
     pub fn new_page(&mut self) -> Arc<BufferPoolFrame> {

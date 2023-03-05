@@ -101,7 +101,7 @@ impl TablePy {
             .iter()
             .map(|v| v.extract::<u64>().unwrap())
             .collect::<Vec<u64>>();
-        self.0.insert_query(vals);
+        self.0.insert_query(&vals);
     }
 
     pub fn build_index(&self, column_num: usize) {

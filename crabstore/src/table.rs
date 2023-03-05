@@ -489,12 +489,19 @@ impl Table {
 
                 let result_cols = included_columns
                     .iter()
-                    .map(|i| {
-                        page.get_column(
-                            self.bufferpool.lock().borrow_mut(),
-                            NUM_METADATA_COLUMNS + i,
-                        )
-                        .slot(rid.slot())
+                    .enumerate()
+                    .filter_map(|(i, x)| {
+                        if *x != 0 {
+                            Some(
+                                page.get_column(
+                                    self.bufferpool.lock().borrow_mut(),
+                                    NUM_METADATA_COLUMNS + i,
+                                )
+                                .slot(rid.slot()),
+                            )
+                        } else {
+                            None
+                        }
                     })
                     .collect::<Vec<u64>>();
 
@@ -523,7 +530,7 @@ impl Table {
             .collect()
     }
 
-    pub fn insert_query(&self, values: Vec<u64>) {
+    pub fn insert_query(&self, values: &[u64]) {
         if self
             .find_row(self.primary_key_index, values[self.primary_key_index])
             .is_some()
@@ -576,7 +583,6 @@ impl Table {
         };
 
         let page = Page::new(page);
-
         page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
             .write_slot(rid.slot(), RID_INVALID);
 
@@ -604,16 +610,18 @@ impl Table {
     }
 
     pub fn sum_query(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
-        let mut bp = self.bufferpool.lock();
         let mut sum: u64 = 0;
         for rid in self
             .find_rows_range(column_index, RangeInclusive::new(start_range, end_range))
             .iter()
         {
-            let latest = self.get_latest_with_bp(&mut bp, *rid);
+            let latest = self.get_latest_with_bp(&mut self.bufferpool.lock(), *rid);
             sum += self
                 .get_page(latest)
-                .get_column(&mut bp, NUM_METADATA_COLUMNS + column_index)
+                .get_column(
+                    &mut self.bufferpool.lock(),
+                    NUM_METADATA_COLUMNS + column_index,
+                )
                 .slot(latest.slot());
         }
 

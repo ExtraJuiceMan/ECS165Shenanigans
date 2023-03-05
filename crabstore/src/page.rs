@@ -3,9 +3,10 @@ use rkyv::{Archive, Deserialize, Serialize};
 use crate::{
     bufferpool::{BufferPool, BufferPoolFrame},
     rid::RID,
-    METADATA_PAGE_HEADER,
+    METADATA_PAGE_HEADER, PAGE_SLOTS,
 };
 use std::{
+    fmt::Display,
     mem::size_of,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -14,8 +15,19 @@ use std::{
 };
 
 #[derive(Debug)]
+
 pub struct PhysicalPage {
     pub page: [u8; crate::PAGE_SIZE],
+}
+
+impl Display for PhysicalPage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Page")?;
+        for i in 0..PAGE_SLOTS {
+            write!(f, "{} ", self.slot(i))?;
+        }
+        writeln!(f)
+    }
 }
 
 impl Default for PhysicalPage {
@@ -41,33 +53,36 @@ impl PhysicalPage {
     }
 }
 
-pub struct Page {
-    column_pages: Arc<[usize]>,
+#[derive(Debug)]
+
+pub struct Page(Arc<[usize]>);
+
+impl Display for Page {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Logical Page")?;
+        for x in self.0.iter() {
+            writeln!(f, "Column Block ID: {x}")?;
+        }
+        writeln!(f)
+    }
 }
 
 impl Page {
     #[inline(always)]
     pub fn new(column_pages: Arc<[usize]>) -> Self {
-        Page { column_pages }
-    }
-
-    pub fn print_cols(&self) {
-        for x in self.column_pages.iter() {
-            println!("Base/Tail Page Column = Page {x}");
-        }
+        Page(Arc::clone(&column_pages))
     }
 
     pub fn read_col(&self, index: usize) -> usize {
-        self.column_pages[index]
+        self.0[index]
     }
 
     pub fn read_metadata(&self, bp: &mut BufferPool) -> u64 {
-        bp.get_page(self.column_pages[METADATA_PAGE_HEADER]).slot(0)
+        bp.get_page(self.0[METADATA_PAGE_HEADER]).slot(0)
     }
 
     pub fn write_metadata(&self, bp: &mut BufferPool, val: u64) {
-        bp.get_page(self.column_pages[METADATA_PAGE_HEADER])
-            .write_slot(0, val);
+        bp.get_page(self.0[METADATA_PAGE_HEADER]).write_slot(0, val);
     }
 
     pub fn write_page_tps(&self, bp: &mut BufferPool, val: u64) {
@@ -88,7 +103,7 @@ impl Page {
 
     #[inline(always)]
     pub fn get_column(&self, bp: &mut BufferPool, index: usize) -> Arc<BufferPoolFrame> {
-        bp.get_page(self.column_pages[index])
+        bp.get_page(self.0[index])
     }
 
     #[inline(always)]
