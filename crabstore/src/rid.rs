@@ -3,20 +3,18 @@ use rkyv::{Archive, Deserialize, Serialize};
 use crate::PAGE_RANGE_COUNT;
 
 #[derive(Archive, Serialize, Deserialize, Clone, Copy, Debug, Default)]
-pub struct RID {
-    rid: u64,
-}
+pub struct RID(pub u64);
 
 impl RID {
     /*
         MSB set, then tail since tail grows downwards from 64 bit max
     */
     pub fn is_tail(&self) -> bool {
-        self.rid >> (usize::BITS - 1) & 1 != 0
+        self.0 >> (u64::BITS - 1) & 1 != 0
     }
 
     pub fn is_invalid(&self) -> bool {
-        self.rid == !0
+        self.0 == !0
     }
 
     /*
@@ -24,9 +22,9 @@ impl RID {
     */
     pub fn untail(&self) -> usize {
         if self.is_tail() {
-            (!(self.rid + 1)) as usize
+            (!(self.0 + 1)) as usize
         } else {
-            self.rid as usize
+            self.0 as usize
         }
     }
 
@@ -39,9 +37,9 @@ impl RID {
 
     pub fn page(&self) -> usize {
         if self.is_tail() {
-            ((self.rid + 1) >> 9) as usize
+            ((self.0 + 1) >> 9) as usize
         } else {
-            (self.rid >> 9) as usize
+            (self.0 >> 9) as usize
         }
     }
 
@@ -50,25 +48,23 @@ impl RID {
     }
 
     pub fn raw(&self) -> u64 {
-        self.rid
+        self.0
     }
 
     /*
         Tail RIDs grow downwards.
     */
     pub fn next(&self) -> RID {
-        RID {
-            rid: if self.is_tail() {
-                self.rid - 1
-            } else {
-                self.rid + 1
-            },
-        }
+        RID(if self.is_tail() {
+            self.0 - 1
+        } else {
+            self.0 + 1
+        })
     }
 }
 
 impl From<u64> for RID {
     fn from(value: u64) -> Self {
-        RID { rid: value }
+        RID(value)
     }
 }

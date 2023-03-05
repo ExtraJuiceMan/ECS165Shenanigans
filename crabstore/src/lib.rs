@@ -11,6 +11,7 @@ use rkyv::ser::{
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
+    str::FromStr,
     sync::{Arc, RwLock},
 };
 use std::{
@@ -19,7 +20,8 @@ use std::{
     mem::size_of,
     path::{Path, PathBuf},
 };
-use table::TablePy;
+use tablepy::TablePy;
+
 const PAGE_SIZE: usize = 4096;
 const PAGE_SLOTS: usize = PAGE_SIZE / size_of::<i64>();
 const PAGE_RANGE_COUNT: usize = 16;
@@ -47,16 +49,19 @@ const BUFFERPOOL_SIZE: usize = 64;
 pub mod bufferpool;
 pub mod disk_manager;
 pub mod index;
+mod merge;
 pub mod page;
 mod page_directory;
 mod range_directory;
 pub mod rid;
 pub mod table;
+pub mod tablepy;
 
 use crate::table::Table;
+
 #[derive(Clone, Debug)]
 #[pyclass(subclass, get_all)]
-pub struct Record {
+pub struct RecordPy {
     rid: u64,
     indirection: u64,
     schema_encoding: u64,
@@ -68,6 +73,7 @@ pub struct RecordRust {
     schema_encoding: u64,
     columns: Vec<u64>,
 }
+
 impl RecordRust {
     pub fn new(rid: u64, indirection: u64, schema_encoding: u64, columns: Vec<u64>) -> Self {
         RecordRust {
@@ -77,7 +83,8 @@ impl RecordRust {
             columns,
         }
     }
-    pub fn from(record: Record) -> Self {
+
+    pub fn from(record: RecordPy) -> Self {
         let mut p = Vec::new();
         Python::with_gil(|py| {
             for c in record.columns.as_ref(py).iter() {
@@ -92,25 +99,31 @@ impl RecordRust {
         }
     }
 }
-impl Record {
-    pub fn from(record: &RecordRust, py: Python) -> Self {
+
+impl RecordPy {
+    pub fn from(record: &RecordRust, py: Python) -> Py<Self> {
         let result_cols = PyList::empty(py);
         for c in record.columns.iter() {
             result_cols.append(c).unwrap();
         }
-        Record::new(
-            record.rid,
-            record.indirection,
-            record.schema_encoding,
-            result_cols.into(),
+        Py::new(
+            py,
+            RecordPy::new(
+                record.rid,
+                record.indirection,
+                record.schema_encoding,
+                result_cols.into(),
+            ),
         )
+        .unwrap()
     }
 }
+
 #[pymethods]
-impl Record {
+impl RecordPy {
     #[new]
     pub fn new(rid: u64, indirection: u64, schema_encoding: u64, columns: Py<PyList>) -> Self {
-        Record {
+        RecordPy {
             rid,
             indirection,
             schema_encoding,
@@ -136,109 +149,22 @@ impl Record {
 
 #[derive(Clone, Debug, Default)]
 struct CrabStore {
-    directory: Option<PathBuf>,
-    tables: HashMap<String, Arc<RwLock<Table>>>,
+    directory: PathBuf,
+    tables: HashMap<String, Arc<Table>>,
 }
+
 impl CrabStore {
-    pub fn database_filename(&self) -> PathBuf {
-        self.directory
-            .as_ref()
-            .unwrap()
-            .join(Path::new("crab_dt.CRAB"))
-    }
-
-    pub fn table_filename(&self, table: &str) -> PathBuf {
-        let mut table_file = table.to_string();
-        table_file.push_str("_db.CRAB");
-
-        self.directory
-            .as_ref()
-            .unwrap()
-            .join(Path::new(&table_file))
-    }
-
-    pub fn page_dir_filename(&self, table: &str) -> PathBuf {
-        let mut pd_file = table.to_string();
-        pd_file.push_str("_pd.CRAB");
-
-        self.directory.as_ref().unwrap().join(Path::new(&pd_file))
-    }
-
-    pub fn index_filename(&self, table: &str) -> PathBuf {
-        let mut id_file = table.to_string();
-        id_file.push_str("_id.CRAB");
-
-        self.directory.as_ref().unwrap().join(Path::new(&id_file))
-    }
-
-    pub fn range_filename(&self, table: &str) -> PathBuf {
-        let mut rd_file = table.to_string();
-        rd_file.push_str("_rd.CRAB");
-
-        self.directory.as_ref().unwrap().join(Path::new(&rd_file))
-    }
-}
-impl CrabStore {
-    pub fn new() -> Self {
-        CrabStore {
-            directory: None,
-            tables: HashMap::new(),
-        }
-    }
-
-    pub fn create_table(
-        &mut self,
-        name: String,
-        num_columns: usize,
-        key_index: usize,
-    ) -> Arc<RwLock<Table>> {
-        let mut table = Arc::new(RwLock::new(Table::new(
-            name.clone(),
-            num_columns,
-            key_index,
-            self.table_filename(name.as_str())
-                .to_str()
-                .unwrap()
-                .to_string(),
-            self.page_dir_filename(name.as_str())
-                .to_str()
-                .unwrap()
-                .to_string(),
-            self.index_filename(name.as_str())
-                .to_str()
-                .unwrap()
-                .to_string(),
-            self.range_filename(name.as_str())
-                .to_str()
-                .unwrap()
-                .to_string(),
-        )));
-        self.tables.insert(name.clone(), table.clone());
-        table
-    }
-
-    pub fn drop_table(&mut self, name: String) -> bool {
-        self.tables.remove(&name);
-        true
-    }
-
-    pub fn get_table(&self, name: String) -> &Arc<RwLock<Table>> {
-        self.tables.get(&name).unwrap()
-    }
-
-    pub fn open(&mut self, path: String) {
-        fs::create_dir_all(&path).unwrap();
-        self.directory = Some(Path::new(&path).into());
-        let crab_file = File::options().read(true).open(self.database_filename());
+    pub fn load_table_index(file: &Path) -> Vec<String> {
+        let crab_file = File::options().read(true).open(file);
 
         if crab_file.is_err() && crab_file.as_ref().unwrap_err().kind() == io::ErrorKind::NotFound {
             File::options()
                 .write(true)
                 .create(true)
-                .open(self.database_filename())
+                .open(file)
                 .expect("Failed to open database file");
 
-            return;
+            return Vec::new();
         }
 
         let mut crab_file = crab_file.unwrap();
@@ -251,25 +177,14 @@ impl CrabStore {
                 .expect("Failed to deserialize database file")
         };
 
-        for name in table_names.iter() {
-            self.tables.insert(
-                name.to_string(),
-                Arc::new(RwLock::new(Table::load(
-                    name,
-                    &self.table_filename(name.as_ref()),
-                    &self.page_dir_filename(name.as_ref()),
-                    &self.index_filename(name.as_ref()),
-                    &self.range_filename(name.as_ref()),
-                ))),
-            );
-        }
+        table_names
     }
 
-    pub fn close(&mut self) {
+    pub fn persist_table_index(file: &Path, table_names: Vec<String>) {
         let crab_file = File::options()
             .write(true)
             .truncate(true)
-            .open(self.database_filename())
+            .open(file)
             .expect("Failed to open database file");
 
         let mut serializer = CompositeSerializer::new(
@@ -278,8 +193,6 @@ impl CrabStore {
             SharedSerializeMap::new(),
         );
 
-        let table_names = self.tables.keys().cloned().collect::<Vec<String>>();
-
         serializer
             .serialize_value(&table_names)
             .expect("Unable to serialize table names");
@@ -287,65 +200,122 @@ impl CrabStore {
         let (buf, _, _) = serializer.into_components();
 
         buf.into_inner().flush().unwrap();
+    }
+
+    pub fn database_filename(directory: &Path) -> PathBuf {
+        directory.join(Path::new("crab_dt.CRAB"))
+    }
+
+    pub fn table_filename(directory: &Path, table: &str) -> PathBuf {
+        let mut table_file = table.to_string();
+        table_file.push_str("_db.CRAB");
+
+        directory.join(Path::new(&table_file))
+    }
+
+    pub fn page_dir_filename(directory: &Path, table: &str) -> PathBuf {
+        let mut pd_file = table.to_string();
+        pd_file.push_str("_pd.CRAB");
+
+        directory.join(Path::new(&pd_file))
+    }
+
+    pub fn index_filename(directory: &Path, table: &str) -> PathBuf {
+        let mut id_file = table.to_string();
+        id_file.push_str("_id.CRAB");
+
+        directory.join(Path::new(&id_file))
+    }
+
+    pub fn range_filename(directory: &Path, table: &str) -> PathBuf {
+        let mut rd_file = table.to_string();
+        rd_file.push_str("_rd.CRAB");
+
+        directory.join(Path::new(&rd_file))
+    }
+}
+
+impl CrabStore {
+    pub fn new(directory: PathBuf) -> Self {
+        CrabStore {
+            directory,
+            tables: HashMap::new(),
+        }
+    }
+
+    pub fn create_table(
+        &mut self,
+        name: String,
+        num_columns: usize,
+        key_index: usize,
+    ) -> Arc<Table> {
+        let mut table = Arc::new(Table::new(
+            name.clone(),
+            num_columns,
+            key_index,
+            &CrabStore::database_filename(&self.directory),
+            &CrabStore::page_dir_filename(&self.directory, &name),
+            &CrabStore::index_filename(&self.directory, &name),
+            &CrabStore::range_filename(&self.directory, &name),
+        ));
+        self.tables.insert(name.clone(), Arc::clone(&table));
+        table
+    }
+
+    pub fn drop_table(&mut self, name: &str) -> bool {
+        self.tables.remove(name);
+        true
+    }
+
+    pub fn get_table(&self, name: &str) -> &Arc<Table> {
+        self.tables.get(name).expect("Table not found")
+    }
+
+    pub fn open(&mut self, path: String) {
+        fs::create_dir_all(&path).expect("Failed to create database directories.");
+        let table_names =
+            CrabStore::load_table_index(&CrabStore::database_filename(&self.directory));
+
+        for name in table_names.iter() {
+            self.tables.insert(
+                name.to_string(),
+                Arc::new(Table::load(
+                    name,
+                    &CrabStore::table_filename(&self.directory, &name),
+                    &CrabStore::page_dir_filename(&self.directory, &name),
+                    &CrabStore::index_filename(&self.directory, &name),
+                    &CrabStore::range_filename(&self.directory, &name),
+                )),
+            );
+        }
+    }
+
+    pub fn close(&mut self) {
+        let table_names = self.tables.keys().cloned().collect::<Vec<String>>();
+
+        CrabStore::persist_table_index(&self.directory, table_names);
 
         for table in self.tables.values() {
-            table.write().unwrap().persist();
+            table.persist();
         }
     }
 }
+
 #[derive(Clone, Debug)]
 #[pyclass]
 struct CrabStorePy {
     directory: Option<PathBuf>,
     tables: HashMap<String, Py<TablePy>>,
 }
-impl CrabStorePy {
-    pub fn database_filename(&self) -> PathBuf {
-        self.directory
-            .as_ref()
-            .unwrap()
-            .join(Path::new("crab_dt.CRAB"))
-    }
 
-    pub fn table_filename(&self, table: &str) -> PathBuf {
-        let mut table_file = table.to_string();
-        table_file.push_str("_db.CRAB");
-
-        self.directory
-            .as_ref()
-            .unwrap()
-            .join(Path::new(&table_file))
-    }
-
-    pub fn page_dir_filename(&self, table: &str) -> PathBuf {
-        let mut pd_file = table.to_string();
-        pd_file.push_str("_pd.CRAB");
-
-        self.directory.as_ref().unwrap().join(Path::new(&pd_file))
-    }
-
-    pub fn index_filename(&self, table: &str) -> PathBuf {
-        let mut id_file = table.to_string();
-        id_file.push_str("_id.CRAB");
-
-        self.directory.as_ref().unwrap().join(Path::new(&id_file))
-    }
-
-    pub fn range_filename(&self, table: &str) -> PathBuf {
-        let mut rd_file = table.to_string();
-        rd_file.push_str("_rd.CRAB");
-
-        self.directory.as_ref().unwrap().join(Path::new(&rd_file))
-    }
-}
 #[pymethods]
 impl CrabStorePy {
     #[new]
     pub fn new() -> Self {
-        Python::with_gil(|py| Self {
+        Self {
             directory: None,
             tables: HashMap::new(),
-        })
+        }
     }
 
     pub fn create_table(
@@ -355,28 +325,16 @@ impl CrabStorePy {
         key_index: usize,
     ) -> Py<TablePy> {
         Python::with_gil(|py| {
-            let mut table = Py::new(
+            let table = Py::new(
                 py,
                 TablePy::new(
                     name.clone(),
                     num_columns,
                     key_index,
-                    self.table_filename(name.as_str())
-                        .to_str()
-                        .unwrap()
-                        .to_string(),
-                    self.page_dir_filename(name.as_str())
-                        .to_str()
-                        .unwrap()
-                        .to_string(),
-                    self.index_filename(name.as_str())
-                        .to_str()
-                        .unwrap()
-                        .to_string(),
-                    self.range_filename(name.as_str())
-                        .to_str()
-                        .unwrap()
-                        .to_string(),
+                    &CrabStore::table_filename(self.directory.as_ref().unwrap(), &name),
+                    &CrabStore::page_dir_filename(self.directory.as_ref().unwrap(), &name),
+                    &CrabStore::index_filename(self.directory.as_ref().unwrap(), &name),
+                    &CrabStore::range_filename(self.directory.as_ref().unwrap(), &name),
                 ),
             )
             .unwrap();
@@ -385,9 +343,8 @@ impl CrabStorePy {
         })
     }
 
-    pub fn drop_table(&mut self, name: String) -> PyResult<()> {
-        self.drop_table(name);
-        Ok(())
+    pub fn drop_table(&mut self, name: String) {
+        self.tables.remove(&name);
     }
 
     pub fn get_table(&self, name: String) -> Py<TablePy> {
@@ -396,28 +353,11 @@ impl CrabStorePy {
 
     pub fn open(&mut self, path: String) {
         fs::create_dir_all(&path).unwrap();
-        self.directory = Some(Path::new(&path).into());
-        let crab_file = File::options().read(true).open(self.database_filename());
+        self.directory = Some(PathBuf::from_str(&path).unwrap());
 
-        if crab_file.is_err() && crab_file.as_ref().unwrap_err().kind() == io::ErrorKind::NotFound {
-            File::options()
-                .write(true)
-                .create(true)
-                .open(self.database_filename())
-                .expect("Failed to open database file");
-
-            return;
-        }
-
-        let mut crab_file = crab_file.unwrap();
-
-        let mut crab_bytes = Vec::new();
-        crab_file.read_to_end(&mut crab_bytes).unwrap();
-
-        let table_names = unsafe {
-            rkyv::from_bytes_unchecked::<Vec<String>>(&crab_bytes)
-                .expect("Failed to deserialize database file")
-        };
+        let table_names = CrabStore::load_table_index(&CrabStore::database_filename(
+            self.directory.as_ref().unwrap(),
+        ));
 
         for name in table_names.iter() {
             Python::with_gil(|py| {
@@ -427,10 +367,10 @@ impl CrabStorePy {
                         py,
                         TablePy::load(
                             name,
-                            &self.table_filename(name.as_ref()),
-                            &self.page_dir_filename(name.as_ref()),
-                            &self.index_filename(name.as_ref()),
-                            &self.range_filename(name.as_ref()),
+                            &CrabStore::database_filename(self.directory.as_ref().unwrap()),
+                            &CrabStore::page_dir_filename(self.directory.as_ref().unwrap(), &name),
+                            &CrabStore::index_filename(self.directory.as_ref().unwrap(), &name),
+                            &CrabStore::range_filename(self.directory.as_ref().unwrap(), &name),
                         ),
                     )
                     .unwrap(),
@@ -440,31 +380,13 @@ impl CrabStorePy {
     }
 
     pub fn close(&mut self) {
-        let crab_file = File::options()
-            .write(true)
-            .truncate(true)
-            .open(self.database_filename())
-            .expect("Failed to open database file");
-
-        let mut serializer = CompositeSerializer::new(
-            WriteSerializer::new(BufWriter::new(crab_file)),
-            AllocScratch::default(),
-            SharedSerializeMap::new(),
-        );
-
         let table_names = self.tables.keys().cloned().collect::<Vec<String>>();
 
-        serializer
-            .serialize_value(&table_names)
-            .expect("Unable to serialize table names");
-
-        let (buf, _, _) = serializer.into_components();
-
-        buf.into_inner().flush().unwrap();
+        CrabStore::persist_table_index(self.directory.as_ref().unwrap(), table_names);
 
         for table in self.tables.values() {
             Python::with_gil(|py| {
-                table.borrow_mut(py).persist();
+                table.borrow(py).persist();
             })
         }
     }
@@ -473,7 +395,7 @@ impl CrabStorePy {
 /// A Python module implemented in Rust.
 #[pymodule]
 fn crabstore(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<Record>()?;
+    m.add_class::<RecordPy>()?;
     m.add_class::<TablePy>()?;
     m.add_class::<CrabStorePy>()?;
     // m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;

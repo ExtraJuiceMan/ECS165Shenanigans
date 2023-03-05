@@ -24,6 +24,7 @@ pub struct Index {
     path: PathBuf,
     indices: Vec<Option<BTreeMap<u64, Vec<RID>>>>,
 }
+
 impl fmt::Display for Index {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for (i, v) in self.indices.iter().enumerate() {
@@ -100,27 +101,6 @@ impl Index {
         let (buf, _, _) = serializer.into_components();
 
         buf.into_inner().flush().expect("Failed to flush indices");
-    }
-
-    pub fn index_meta_to_bit_vector(&self) -> usize {
-        let mut bit_vector: usize = 0;
-        for (i, x) in self.indices.iter().enumerate() {
-            if x.is_none() {
-                continue;
-            }
-
-            bit_vector |= 1 << i;
-        }
-
-        bit_vector
-    }
-
-    pub fn create_indexes_from_bit_vector(&mut self, bit_vector: usize) {
-        for idx in 0..self.indices.len() {
-            if (1 << idx) & bit_vector != 0 {
-                self.create_index(idx);
-            }
-        }
     }
 
     pub fn update_index(&mut self, column_number: usize, value: u64, rid: RID) {

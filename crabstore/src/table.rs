@@ -13,7 +13,7 @@ use crate::{
     page_directory::PageDirectory,
 };
 use crate::{
-    Record, RecordRust, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING,
+    RecordPy, RecordRust, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING,
     NUM_METADATA_COLUMNS,
 };
 use parking_lot::{lock_api::RawMutex, Mutex, RwLock};
@@ -24,7 +24,6 @@ use rkyv::{
     Archive, Deserialize, Serialize,
 };
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
-use std::ops::{RangeBounds, RangeInclusive};
 use std::{
     borrow::BorrowMut,
     mem::size_of,
@@ -33,6 +32,10 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
+};
+use std::{
+    fmt,
+    ops::{RangeBounds, RangeInclusive},
 };
 use std::{
     hash::BuildHasherDefault,
@@ -44,218 +47,40 @@ use std::{
 pub struct TableHeaderPage {
     num_columns: usize,
     primary_key_index: usize,
-    indexed_columns: usize,
     next_free_page: usize,
     next_rid: u64,
     next_tid: u64,
 }
-#[derive(Debug)]
-#[pyclass]
-pub struct TablePy {
-    table: Table,
-}
+
 #[derive(Debug)]
 pub struct Table {
     name: String,
     num_columns: usize,
     primary_key_index: usize,
-    index: Index,
+    index: RwLock<Index>,
     next_rid: AtomicU64,
     next_tid: AtomicU64,
     page_dir: Arc<RwLock<PageDirectory>>,
     range_dir: Arc<RwLock<RangeDirectory>>,
     bufferpool: Arc<Mutex<BufferPool>>,
     disk: Arc<DiskManager>,
-    merge_thread_handle: Option<(JoinHandle<()>, Sender<usize>)>,
+    merge_thread_handle: Mutex<Option<(JoinHandle<()>, Sender<usize>)>>,
 }
 
 impl Table {
-    fn spawn_merge_thread(
-        page_directory: &Arc<RwLock<PageDirectory>>,
-        range_directory: &Arc<RwLock<RangeDirectory>>,
-        disk_manager: &Arc<DiskManager>,
-        main_bufferpool: &Arc<Mutex<BufferPool>>,
-        num_columns: usize,
-    ) -> (JoinHandle<()>, Sender<usize>) {
-        let page_dir_clone = Arc::clone(page_directory);
-        let disk_manager_clone = Arc::clone(disk_manager);
-        let range_dir_clone = Arc::clone(range_directory);
-        let main_bp_clone = Arc::clone(main_bufferpool);
-        let (send, recv) = channel();
-        let handle = thread::spawn(move || {
-            let copy_mask = (0b111);
-            let num_columns = num_columns;
-            let main_bufferpool = main_bp_clone;
-            let page_dir = page_dir_clone;
-            let range_dir = range_dir_clone;
-            let disk = disk_manager_clone;
-            let recv = recv;
-            let mut seen: FxHashSet<u64> = FxHashSet::with_capacity_and_hasher(
-                PAGE_SLOTS * PAGE_RANGE_COUNT,
-                BuildHasherDefault::<FxHasher>::default(),
-            );
-            let mut merged: FxHashMap<usize, Arc<[usize]>> = FxHashMap::with_capacity_and_hasher(
-                PAGE_SLOTS * PAGE_RANGE_COUNT,
-                BuildHasherDefault::<FxHasher>::default(),
-            );
-
-            loop {
-                let merge_range = recv.recv();
-
-                if merge_range.is_err() {
-                    return;
-                }
-
-                main_bufferpool.lock().flush_all();
-
-                let merge_range = merge_range.unwrap();
-
-                let range_dir = range_dir.write();
-                let range = range_dir.get(merge_range);
-                let merge_from = range.current_tail_page.load(Ordering::SeqCst);
-
-                let last_page = Page::new(
-                    page_dir
-                        .read()
-                        .get_page(merge_from)
-                        .expect("Bad page ID for Page Range encountered in merge"),
-                )
-                .read_last_tail(&mut main_bufferpool.lock())
-                    as usize;
-
-                let merge_stop_at = range.merged_until.load(Ordering::SeqCst);
-
-                range.merged_until.store(last_page, Ordering::SeqCst);
-
-                drop(range_dir);
-
-                let mut tail_page_id = last_page;
-
-                while tail_page_id > merge_stop_at && tail_page_id != RID_INVALID as usize {
-                    let tail_page = Page::new(
-                        page_dir
-                            .read()
-                            .get_page(tail_page_id)
-                            .expect("Bad page ID for Page Range encountered in merge"),
-                    );
-
-                    for tail_slot in (0..PAGE_SLOTS).rev() {
-                        let base_rid = tail_page
-                            .get_column(&mut main_bufferpool.lock(), METADATA_BASE_RID)
-                            .slot(tail_slot);
-
-                        assert!(base_rid != RID_INVALID);
-
-                        if seen.contains(&base_rid) {
-                            continue;
-                        }
-
-                        seen.insert(base_rid);
-
-                        let base_page_id = RID::from(base_rid).page();
-
-                        let merged_page = Page::new(Arc::clone(
-                            merged.entry(base_page_id).or_insert_with(|| {
-                                let mut new_page_dir_entry =
-                                    Arc::new_uninit_slice(NUM_METADATA_COLUMNS + num_columns);
-
-                                let page_dir = page_dir.read();
-
-                                let base_cols = page_dir
-                                    .get_page(base_page_id)
-                                    .expect("Merge thread tried to access a non-existent page id");
-
-                                drop(page_dir);
-
-                                let new_page = Arc::get_mut(&mut new_page_dir_entry).unwrap();
-                                new_page[METADATA_INDIRECTION]
-                                    .write(base_cols[METADATA_INDIRECTION]);
-                                new_page[METADATA_BASE_RID].write(base_cols[METADATA_BASE_RID]);
-                                new_page[METADATA_RID].write(base_cols[METADATA_RID]);
-
-                                let mut new_column_ids = disk.reserve_range(
-                                    NUM_METADATA_COLUMNS - NUM_STATIC_COLUMNS + num_columns,
-                                );
-
-                                for i in NUM_STATIC_COLUMNS..(NUM_METADATA_COLUMNS + num_columns) {
-                                    new_page[i].write(new_column_ids);
-                                    new_column_ids += 1;
-                                }
-
-                                let new_page_dir_entry =
-                                    unsafe { new_page_dir_entry.assume_init() };
-
-                                let bp = &mut main_bufferpool.lock();
-                                for i in NUM_STATIC_COLUMNS..(NUM_METADATA_COLUMNS + num_columns) {
-                                    let page = bp.get_page(base_cols[i]);
-                                    let page_copy = bp.get_page(new_page_dir_entry[i]);
-
-                                    let page = page
-                                        .raw()
-                                        .read()
-                                        .expect("Failed to acquire merge page lock");
-                                    let mut page_copy = page_copy
-                                        .raw()
-                                        .write()
-                                        .expect("Failed to acquire merge page lock");
-
-                                    // println!("{:?}", page.page);
-
-                                    page_copy.page.clone_from_slice(&page.page);
-                                }
-
-                                new_page_dir_entry
-                            }),
-                        ));
-
-                        let bp = &mut main_bufferpool.lock();
-                        let tid = tail_page.get_column(bp, METADATA_RID).slot(tail_slot);
-
-                        if merged_page.read_page_tps(bp) > tid && tid != 0 {
-                            merged_page.write_page_tps(bp, tid);
-                        }
-
-                        for i in (NUM_STATIC_COLUMNS + 1)..(NUM_METADATA_COLUMNS + num_columns) {
-                            let updated_value = tail_page.get_column(bp, i).slot(tail_slot);
-                            merged_page
-                                .get_column(bp, i)
-                                .write_slot(RID::from(base_rid).slot(), updated_value);
-                        }
-                    }
-
-                    tail_page_id = tail_page.read_last_tail(&mut main_bufferpool.lock()) as usize;
-                }
-
-                main_bufferpool.lock().flush_all();
-
-                let mut page_dir = page_dir.write();
-
-                for pair in &merged {
-                    page_dir.replace_page(*pair.0, pair.1);
-                }
-
-                drop(page_dir);
-
-                merged.clear();
-                seen.clear();
-            }
-        });
-
-        (handle, send)
-    }
     pub fn new(
         name: String,
         num_columns: usize,
         key_index: usize,
-        db_file: String,
-        pd_file: String,
-        id_file: String,
-        rd_file: String,
+        db_file: &Path,
+        pd_file: &Path,
+        id_file: &Path,
+        rd_file: &Path,
     ) -> Table {
-        let page_dir = Arc::new(RwLock::new(PageDirectory::new(Path::new(&pd_file))));
-        let range_dir = Arc::new(RwLock::new(RangeDirectory::new(Path::new(&rd_file))));
+        let page_dir = Arc::new(RwLock::new(PageDirectory::new(pd_file)));
+        let range_dir = Arc::new(RwLock::new(RangeDirectory::new(rd_file)));
 
-        let disk = Arc::new(DiskManager::new(Path::new(&db_file)).unwrap());
+        let disk = Arc::new(DiskManager::new(db_file).unwrap());
         let bufferpool = Arc::new(Mutex::new(BufferPool::new(
             Arc::clone(&disk),
             BUFFERPOOL_SIZE,
@@ -267,16 +92,17 @@ impl Table {
             name,
             num_columns,
             primary_key_index: key_index,
-            index: Index::new(key_index, num_columns, Path::new(&id_file)),
+            index: RwLock::new(Index::new(key_index, num_columns, id_file)),
             next_rid: 0.into(),
             next_tid: (!0 - 1).into(),
             page_dir,
             range_dir,
             disk,
             bufferpool,
-            merge_thread_handle: Some(merge_thread_handle),
+            merge_thread_handle: Mutex::new(Some(merge_thread_handle)),
         }
     }
+
     pub fn load(
         name: &str,
         db_file: &Path,
@@ -299,7 +125,7 @@ impl Table {
 
         disk.set_free_page_pointer(header.next_free_page);
 
-        let index = Index::load(id_file);
+        let index = RwLock::new(Index::load(id_file));
         let page_dir = Arc::new(RwLock::new(PageDirectory::load(pd_file)));
         let range_dir = Arc::new(RwLock::new(RangeDirectory::load(rd_file)));
         let bufferpool = Arc::new(Mutex::new(BufferPool::new(
@@ -326,12 +152,14 @@ impl Table {
             bufferpool,
             next_rid: header.next_rid.into(),
             next_tid: header.next_tid.into(),
-            merge_thread_handle: Some(merge_thread_handle),
+            merge_thread_handle: Mutex::new(Some(merge_thread_handle)),
         }
     }
 
-    pub fn persist(&mut self) {
-        let merge_thread_handle = std::mem::replace(&mut self.merge_thread_handle, None).unwrap();
+    pub fn persist(&self) {
+        let merge_thread_handle =
+            std::mem::replace(&mut *self.merge_thread_handle.lock(), None).unwrap();
+
         drop(merge_thread_handle.1);
         merge_thread_handle
             .0
@@ -344,7 +172,6 @@ impl Table {
             next_rid: self.next_rid.load(Ordering::Relaxed),
             next_tid: self.next_tid.load(Ordering::Relaxed),
             next_free_page: self.disk.free_page_pointer(),
-            indexed_columns: self.index.index_meta_to_bit_vector(),
         };
 
         let mut page = [0; PAGE_SIZE];
@@ -365,7 +192,8 @@ impl Table {
         let range_dir = self.range_dir.write();
         range_dir.persist();
 
-        self.index.persist();
+        let index = self.index.write();
+        index.persist();
     }
 
     pub fn next_tid(&self, range_id: usize) -> RID {
@@ -392,7 +220,8 @@ impl Table {
 
             range_dir.new_range_tail(range_id, new_tail);
 
-            self.merge_thread_handle
+            let merge_thread_handle = self.merge_thread_handle.lock();
+            merge_thread_handle
                 .as_ref()
                 .expect("No merge handle")
                 .1
@@ -439,7 +268,7 @@ impl Table {
     }
 
     fn find_row(&self, column_index: usize, value: u64) -> Option<RID> {
-        match self.index.get_from_index(column_index, value) {
+        match self.index.read().get_from_index(column_index, value) {
             Some(vals) => vals
                 .iter()
                 .find(|x| {
@@ -489,7 +318,7 @@ impl Table {
     }
 
     fn find_rows(&self, column_index: usize, value: u64) -> Vec<RID> {
-        match self.index.get_from_index(column_index, value) {
+        match self.index.read().get_from_index(column_index, value) {
             Some(vals) => vals
                 .into_iter()
                 .filter(|x| {
@@ -543,7 +372,11 @@ impl Table {
         column_index: usize,
         range: impl RangeBounds<u64> + Clone,
     ) -> Vec<RID> {
-        match self.index.range_from_index(column_index, range.clone()) {
+        match self
+            .index
+            .read()
+            .range_from_index(column_index, range.clone())
+        {
             Some(vals) => vals,
             None => {
                 let mut rids: Vec<RID> = Vec::new();
@@ -632,6 +465,15 @@ impl Table {
     pub fn total_columns(&self) -> usize {
         NUM_METADATA_COLUMNS + self.num_columns
     }
+
+    pub fn columns(&self) -> usize {
+        self.num_columns
+    }
+
+    pub fn primary_key(&self) -> usize {
+        self.primary_key_index
+    }
+
     pub fn select_query(
         &self,
         search_value: u64,
@@ -671,18 +513,24 @@ impl Table {
                     )
                     .slot(rid.slot());
 
-                let record = RecordRust {
+                RecordRust {
                     rid: original_rid,
                     indirection,
                     schema_encoding: schema,
                     columns: result_cols,
-                };
-
-                record
+                }
             })
             .collect()
     }
-    pub fn insert_query(&mut self, values: Vec<u64>) {
+
+    pub fn insert_query(&self, values: Vec<u64>) {
+        if self
+            .find_row(self.primary_key_index, values[self.primary_key_index])
+            .is_some()
+        {
+            return;
+        }
+
         let rid: RID = self.next_rid.fetch_add(1, Ordering::Relaxed).into();
 
         let page_dir = self.page_dir.read();
@@ -749,8 +597,9 @@ impl Table {
             .write_slot(rid.slot(), *val);
         }
 
+        let mut index = self.index.write();
         for i in 0..self.num_columns {
-            self.index.update_index(i, *values.get(i).unwrap(), rid);
+            index.update_index(i, values[i], rid);
         }
     }
 
@@ -771,10 +620,10 @@ impl Table {
         sum
     }
 
-    pub fn update_query(&mut self, key: u64, values: &Vec<Option<u64>>) -> bool {
+    pub fn update_query(&self, key: u64, values: &[Option<u64>]) -> bool {
         let row = self.find_row(self.primary_key_index, key);
 
-        if let Some(pk) = values[self.primary_key_index] {
+        if let Some(_pk) = values[self.primary_key_index] {
             if row.is_some() {
                 return false;
             }
@@ -786,7 +635,7 @@ impl Table {
 
         let base_rid = row.unwrap();
         let base_page = self.get_page(base_rid);
-        let updated_values = self.merge_values(base_rid, &values);
+        let updated_values = self.merge_values(base_rid, values);
 
         let old_latest_rid: RID = self
             .get_page(base_rid)
@@ -844,9 +693,11 @@ impl Table {
         for (i, v) in values.iter().enumerate() {
             if !v.is_none() {
                 schema_encoding |= 1 << i;
-                self.index.update_index(i, v.unwrap(), base_rid);
+                let mut index = self.index.write();
+
+                index.update_index(i, v.unwrap(), base_rid);
                 if (old_schema_encoding & (1 << i)) == 1 || old_latest_rid.is_invalid() {
-                    self.index.remove_index(
+                    index.remove_index(
                         i,
                         base_page
                             .get_column(
@@ -857,7 +708,9 @@ impl Table {
                         base_rid,
                     );
                 } else if !old_latest_rid.is_invalid() && (old_schema_encoding & (1 << i)) == 1 {
-                    self.index.remove_index(
+                    let mut index = self.index.write();
+
+                    index.remove_index(
                         i,
                         self.get_page(old_latest_rid)
                             .get_column(
@@ -886,7 +739,7 @@ impl Table {
 
         true
     }
-    pub fn delete_query(&mut self, key: u64) -> bool {
+    pub fn delete_query(&self, key: u64) -> bool {
         let row = self.find_row(self.primary_key_index, key);
 
         if row.is_none() {
@@ -920,8 +773,9 @@ impl Table {
 
         true
     }
-    pub fn build_index(&mut self, column_num: usize) {
-        self.index.create_index(column_num);
+    pub fn build_index(&self, column_num: usize) {
+        let mut index = self.index.write();
+        index.create_index(column_num);
         let mut rid: RID = 0.into();
         let max_rid = self.next_rid.load(Ordering::Relaxed);
         while rid.raw() < max_rid {
@@ -935,7 +789,7 @@ impl Table {
             }
 
             let latest = self.get_latest(rid);
-            self.index.update_index(
+            index.update_index(
                 column_num,
                 self.get_page(latest)
                     .get_column(
@@ -948,138 +802,19 @@ impl Table {
             rid = rid.next();
         }
     }
-    pub fn drop_index(&mut self, column_num: usize) {
-        self.index.drop_index(column_num);
-    }
-    pub fn print(&self) {
-        println!("{}", self.name);
-        println!("{}", self.num_columns);
-        println!("{}", self.primary_key_index);
-        println!("{}", self.index);
-    }
 
-
-}
-impl TablePy {
-    pub fn load(
-        name: &str,
-        db_file: &Path,
-        pd_file: &Path,
-        id_file: &Path,
-        rd_file: &Path,
-    ) -> Self {
-        Self {
-            table: Table::load(name, db_file, pd_file, id_file, rd_file),
-        }
-    }
-    pub fn persist(&mut self) {
-        self.table.persist();
+    pub fn drop_index(&self, column_num: usize) {
+        self.index.write().drop_index(column_num);
     }
 }
-#[pymethods]
-impl TablePy {
-    #[getter]
-    fn num_columns(&self) -> usize {
-        self.table.num_columns
-    }
 
-    #[new]
-    pub fn new(
-        name: String,
-        num_columns: usize,
-        key_index: usize,
-        db_file: String,
-        pd_file: String,
-        id_file: String,
-        rd_file: String,
-    ) -> TablePy {
-        let table = Table::new(
-            name,
-            num_columns,
-            key_index,
-            db_file,
-            pd_file,
-            id_file,
-            rd_file,
-        );
-        return TablePy { table };
-    }
-
-    pub fn sum(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
-        self.table.sum_query(start_range, end_range, column_index)
-    }
-
-    pub fn select(&self, search_value: u64, column_index: usize, columns: &PyList) -> Py<PyList> {
-        if column_index >= self.table.num_columns {
-            return Python::with_gil(|py| -> Py<PyList> { PyList::empty(py).into() });
-        }
-
-        let included_columns: Vec<usize> = columns
-            .iter()
-            .enumerate()
-            .filter(|(_i, x)| x.extract::<u64>().unwrap() != 0)
-            .map(|(i, _x)| i)
-            .collect();
-
-        let results = self
-            .table
-            .select_query(search_value, column_index, &included_columns);
-        Python::with_gil(|py| -> Py<PyList> {
-            let selected_records: Py<PyList> = PyList::empty(py).into();
-            for result in results {
-                selected_records
-                    .as_ref(py)
-                    .append(Record::from(&result, py).into_py(py))
-                    .expect("Failed to append to python list");
-            }
-            selected_records
-        })
-    }
-
-    pub fn update(&mut self, key: u64, values: &PyTuple) -> bool {
-        let vals: Vec<Option<u64>> = values
-            .iter()
-            .map(|val| val.extract::<Option<u64>>().unwrap())
-            .collect::<Vec<Option<u64>>>();
-        self.table.update_query(key, &vals)
-    }
-
-    pub fn delete(&mut self, key: u64) -> bool {
-        self.table.delete_query(key)
-    }
-
-    #[args(values = "*")]
-    pub fn insert(&mut self, values: &PyTuple) {
-        if self
-            .table
-            .find_row(
-                self.table.primary_key_index,
-                values
-                    .get_item(self.table.primary_key_index)
-                    .unwrap()
-                    .extract::<u64>()
-                    .unwrap(),
-            )
-            .is_some()
-        {
-            return;
-        }
-        let vals = values
-            .iter()
-            .map(|v| v.extract::<u64>().unwrap())
-            .collect::<Vec<u64>>();
-        self.table.insert_query(vals);
-    }
-
-    pub fn build_index(&mut self, column_num: usize) {
-        self.table.build_index(column_num);
-    }
-
-    pub fn drop_index(&mut self, column_num: usize) {
-        self.table.drop_index(column_num);
-    }
-
-    pub fn print(&self) {
-        self.table.print();
+impl fmt::Display for Table {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "[Table \"{}\"]", self.name)?;
+        writeln!(f, "{} Columns: ", self.num_columns)?;
+        writeln!(f, "PK: {}", self.primary_key_index)?;
+        writeln!(f, "Current RID: {}", self.next_rid.load(Ordering::Relaxed))?;
+        writeln!(f, "Current TID: {}", self.next_rid.load(Ordering::Relaxed))?;
+        writeln!(f)
     }
 }
