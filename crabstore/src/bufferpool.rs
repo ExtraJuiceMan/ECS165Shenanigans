@@ -69,7 +69,7 @@ impl BufferPoolFrame {
         &self.page
     }
 }
-
+#[derive(Debug)]
 pub struct BufferPool {
     disk: Arc<DiskManager>,
     size: usize,

@@ -49,8 +49,12 @@ pub struct TableHeaderPage {
     next_rid: u64,
     next_tid: u64,
 }
-
-#[pyclass(subclass)]
+#[derive(Debug)]
+#[pyclass]
+pub struct TablePy {
+    table: Table,
+}
+#[derive(Debug)]
 pub struct Table {
     name: String,
     num_columns: usize,
@@ -239,7 +243,40 @@ impl Table {
 
         (handle, send)
     }
+    pub fn new(
+        name: String,
+        num_columns: usize,
+        key_index: usize,
+        db_file: String,
+        pd_file: String,
+        id_file: String,
+        rd_file: String,
+    ) -> Table {
+        let page_dir = Arc::new(RwLock::new(PageDirectory::new(Path::new(&pd_file))));
+        let range_dir = Arc::new(RwLock::new(RangeDirectory::new(Path::new(&rd_file))));
 
+        let disk = Arc::new(DiskManager::new(Path::new(&db_file)).unwrap());
+        let bufferpool = Arc::new(Mutex::new(BufferPool::new(
+            Arc::clone(&disk),
+            BUFFERPOOL_SIZE,
+        )));
+        let merge_thread_handle =
+            Table::spawn_merge_thread(&page_dir, &range_dir, &disk, &bufferpool, num_columns);
+
+        Table {
+            name,
+            num_columns,
+            primary_key_index: key_index,
+            index: Index::new(key_index, num_columns, Path::new(&id_file)),
+            next_rid: 0.into(),
+            next_tid: (!0 - 1).into(),
+            page_dir,
+            range_dir,
+            disk,
+            bufferpool,
+            merge_thread_handle: Some(merge_thread_handle),
+        }
+    }
     pub fn load(
         name: &str,
         db_file: &Path,
@@ -716,52 +753,8 @@ impl Table {
             self.index.update_index(i, *values.get(i).unwrap(), rid);
         }
     }
-}
 
-#[pymethods]
-impl Table {
-    #[getter]
-    fn num_columns(&self) -> usize {
-        self.num_columns
-    }
-
-    #[new]
-    pub fn new(
-        name: String,
-        num_columns: usize,
-        key_index: usize,
-        db_file: String,
-        pd_file: String,
-        id_file: String,
-        rd_file: String,
-    ) -> Table {
-        let page_dir = Arc::new(RwLock::new(PageDirectory::new(Path::new(&pd_file))));
-        let range_dir = Arc::new(RwLock::new(RangeDirectory::new(Path::new(&rd_file))));
-
-        let disk = Arc::new(DiskManager::new(Path::new(&db_file)).unwrap());
-        let bufferpool = Arc::new(Mutex::new(BufferPool::new(
-            Arc::clone(&disk),
-            BUFFERPOOL_SIZE,
-        )));
-        let merge_thread_handle =
-            Table::spawn_merge_thread(&page_dir, &range_dir, &disk, &bufferpool, num_columns);
-
-        Table {
-            name,
-            num_columns,
-            primary_key_index: key_index,
-            index: Index::new(key_index, num_columns, Path::new(&id_file)),
-            next_rid: 0.into(),
-            next_tid: (!0 - 1).into(),
-            page_dir,
-            range_dir,
-            disk,
-            bufferpool,
-            merge_thread_handle: Some(merge_thread_handle),
-        }
-    }
-
-    pub fn sum(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
+    pub fn sum_query(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
         let mut bp = self.bufferpool.lock();
         let mut sum: u64 = 0;
         for rid in self
@@ -778,40 +771,10 @@ impl Table {
         sum
     }
 
-    pub fn select(&self, search_value: u64, column_index: usize, columns: &PyList) -> Py<PyList> {
-        if column_index >= self.num_columns {
-            return Python::with_gil(|py| -> Py<PyList> { PyList::empty(py).into() });
-        }
-
-        let included_columns: Vec<usize> = columns
-            .iter()
-            .enumerate()
-            .filter(|(_i, x)| x.extract::<u64>().unwrap() != 0)
-            .map(|(i, _x)| i)
-            .collect();
-
-        let results = self.select_query(search_value, column_index, &included_columns);
-        Python::with_gil(|py| -> Py<PyList> {
-            let selected_records: Py<PyList> = PyList::empty(py).into();
-            for result in results {
-                selected_records
-                    .as_ref(py)
-                    .append(Record::from(&result, py).into_py(py))
-                    .expect("Failed to append to python list");
-            }
-            selected_records
-        })
-    }
-
-    pub fn update(&mut self, key: u64, values: &PyTuple) -> bool {
-        let vals: Vec<Option<u64>> = values
-            .iter()
-            .map(|val| val.extract::<Option<u64>>().unwrap())
-            .collect::<Vec<Option<u64>>>();
-
+    pub fn update_query(&mut self, key: u64, values: &Vec<Option<u64>>) -> bool {
         let row = self.find_row(self.primary_key_index, key);
 
-        if let Some(pk) = vals[self.primary_key_index] {
+        if let Some(pk) = values[self.primary_key_index] {
             if row.is_some() {
                 return false;
             }
@@ -823,7 +786,7 @@ impl Table {
 
         let base_rid = row.unwrap();
         let base_page = self.get_page(base_rid);
-        let updated_values = self.merge_values(base_rid, &vals);
+        let updated_values = self.merge_values(base_rid, &values);
 
         let old_latest_rid: RID = self
             .get_page(base_rid)
@@ -878,7 +841,7 @@ impl Table {
 
         let mut schema_encoding: u64 = 0;
 
-        for (i, v) in vals.iter().enumerate() {
+        for (i, v) in values.iter().enumerate() {
             if !v.is_none() {
                 schema_encoding |= 1 << i;
                 self.index.update_index(i, v.unwrap(), base_rid);
@@ -923,8 +886,7 @@ impl Table {
 
         true
     }
-
-    pub fn delete(&mut self, key: u64) -> bool {
+    pub fn delete_query(&mut self, key: u64) -> bool {
         let row = self.find_row(self.primary_key_index, key);
 
         if row.is_none() {
@@ -958,29 +920,6 @@ impl Table {
 
         true
     }
-
-    #[args(values = "*")]
-    pub fn insert(&mut self, values: &PyTuple) {
-        if self
-            .find_row(
-                self.primary_key_index,
-                values
-                    .get_item(self.primary_key_index)
-                    .unwrap()
-                    .extract::<u64>()
-                    .unwrap(),
-            )
-            .is_some()
-        {
-            return;
-        }
-        let vals = values
-            .iter()
-            .map(|v| v.extract::<u64>().unwrap())
-            .collect::<Vec<u64>>();
-        self.insert_query(vals);
-    }
-
     pub fn build_index(&mut self, column_num: usize) {
         self.index.create_index(column_num);
         let mut rid: RID = 0.into();
@@ -1009,11 +948,9 @@ impl Table {
             rid = rid.next();
         }
     }
-
     pub fn drop_index(&mut self, column_num: usize) {
         self.index.drop_index(column_num);
     }
-
     pub fn print(&self) {
         println!("{}", self.name);
         println!("{}", self.num_columns);
@@ -1022,4 +959,127 @@ impl Table {
     }
 
 
+}
+impl TablePy {
+    pub fn load(
+        name: &str,
+        db_file: &Path,
+        pd_file: &Path,
+        id_file: &Path,
+        rd_file: &Path,
+    ) -> Self {
+        Self {
+            table: Table::load(name, db_file, pd_file, id_file, rd_file),
+        }
+    }
+    pub fn persist(&mut self) {
+        self.table.persist();
+    }
+}
+#[pymethods]
+impl TablePy {
+    #[getter]
+    fn num_columns(&self) -> usize {
+        self.table.num_columns
+    }
+
+    #[new]
+    pub fn new(
+        name: String,
+        num_columns: usize,
+        key_index: usize,
+        db_file: String,
+        pd_file: String,
+        id_file: String,
+        rd_file: String,
+    ) -> TablePy {
+        let table = Table::new(
+            name,
+            num_columns,
+            key_index,
+            db_file,
+            pd_file,
+            id_file,
+            rd_file,
+        );
+        return TablePy { table };
+    }
+
+    pub fn sum(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
+        self.table.sum_query(start_range, end_range, column_index)
+    }
+
+    pub fn select(&self, search_value: u64, column_index: usize, columns: &PyList) -> Py<PyList> {
+        if column_index >= self.table.num_columns {
+            return Python::with_gil(|py| -> Py<PyList> { PyList::empty(py).into() });
+        }
+
+        let included_columns: Vec<usize> = columns
+            .iter()
+            .enumerate()
+            .filter(|(_i, x)| x.extract::<u64>().unwrap() != 0)
+            .map(|(i, _x)| i)
+            .collect();
+
+        let results = self
+            .table
+            .select_query(search_value, column_index, &included_columns);
+        Python::with_gil(|py| -> Py<PyList> {
+            let selected_records: Py<PyList> = PyList::empty(py).into();
+            for result in results {
+                selected_records
+                    .as_ref(py)
+                    .append(Record::from(&result, py).into_py(py))
+                    .expect("Failed to append to python list");
+            }
+            selected_records
+        })
+    }
+
+    pub fn update(&mut self, key: u64, values: &PyTuple) -> bool {
+        let vals: Vec<Option<u64>> = values
+            .iter()
+            .map(|val| val.extract::<Option<u64>>().unwrap())
+            .collect::<Vec<Option<u64>>>();
+        self.table.update_query(key, &vals)
+    }
+
+    pub fn delete(&mut self, key: u64) -> bool {
+        self.table.delete_query(key)
+    }
+
+    #[args(values = "*")]
+    pub fn insert(&mut self, values: &PyTuple) {
+        if self
+            .table
+            .find_row(
+                self.table.primary_key_index,
+                values
+                    .get_item(self.table.primary_key_index)
+                    .unwrap()
+                    .extract::<u64>()
+                    .unwrap(),
+            )
+            .is_some()
+        {
+            return;
+        }
+        let vals = values
+            .iter()
+            .map(|v| v.extract::<u64>().unwrap())
+            .collect::<Vec<u64>>();
+        self.table.insert_query(vals);
+    }
+
+    pub fn build_index(&mut self, column_num: usize) {
+        self.table.build_index(column_num);
+    }
+
+    pub fn drop_index(&mut self, column_num: usize) {
+        self.table.drop_index(column_num);
+    }
+
+    pub fn print(&self) {
+        self.table.print();
+    }
 }

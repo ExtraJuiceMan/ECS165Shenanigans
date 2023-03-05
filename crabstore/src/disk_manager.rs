@@ -14,7 +14,7 @@ use std::os::windows::prelude::FileExt;
 use parking_lot::Mutex;
 
 use crate::PAGE_SIZE;
-
+#[derive(Debug)]
 pub struct DiskManager {
     file: Mutex<File>,
     next_free_page: AtomicUsize,
