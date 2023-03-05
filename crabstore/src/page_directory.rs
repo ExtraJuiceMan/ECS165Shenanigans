@@ -17,7 +17,7 @@ use rkyv::{
 use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::rid::RID;
-
+#[derive(Debug)]
 pub struct PageDirectory {
     path: PathBuf,
     directory: FxHashMap<usize, Arc<[usize]>>,

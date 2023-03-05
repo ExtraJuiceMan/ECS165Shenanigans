@@ -13,7 +13,7 @@ use std::{
     io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
 };
-
+#[derive(Debug)]
 pub struct RangeDirectory {
     path: PathBuf,
     directory: Vec<PageRange>,
