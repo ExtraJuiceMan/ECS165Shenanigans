@@ -125,7 +125,6 @@ impl Index {
 
     pub fn update_index(&mut self, column_number: usize, value: u64, rid: RID) {
         if let Some(ref mut index) = self.indices[column_number] {
-            println!("Updating index {column_number}");
             if let Some(ref mut rids) = index.get_mut(&value) {
                 rids.push(rid);
             } else {

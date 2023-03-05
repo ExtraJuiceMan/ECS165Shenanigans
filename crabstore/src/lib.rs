@@ -34,7 +34,9 @@ const METADATA_SCHEMA_ENCODING: usize = 4;
 // 0xFF...FF
 const RID_INVALID: u64 = !0;
 
-const BUFFERPOOL_SIZE: usize = 16;
+// usually 16, but 32 to
+// allow for shared bufferpool with merge thread
+const BUFFERPOOL_SIZE: usize = 64;
 
 pub mod bufferpool;
 pub mod disk_manager;

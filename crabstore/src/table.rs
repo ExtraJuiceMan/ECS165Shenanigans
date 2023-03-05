@@ -16,9 +16,9 @@ use crate::{
     Record, RecordRust, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING,
     NUM_METADATA_COLUMNS,
 };
-use parking_lot::{Mutex, RwLock};
-use pyo3::prelude::*;
-use pyo3::types::{PyList, PyTuple};
+use parking_lot::{lock_api::RawMutex, Mutex, RwLock};
+use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::{prelude::*, types::PyCFunction};
 use rkyv::{
     ser::{serializers::BufferSerializer, Serializer},
     Archive, Deserialize, Serialize,
@@ -79,19 +79,13 @@ impl Table {
         let main_bp_clone = Arc::clone(main_bufferpool);
         let (send, recv) = channel();
         let handle = thread::spawn(move || {
-            let copy_mask = 0b111;
+            let copy_mask = (0b111);
             let num_columns = num_columns;
             let main_bufferpool = main_bp_clone;
-
             let page_dir = page_dir_clone;
             let range_dir = range_dir_clone;
             let disk = disk_manager_clone;
             let recv = recv;
-            let merge_pool = Arc::new(Mutex::new(BufferPool::new(
-                Arc::clone(&disk),
-                BUFFERPOOL_SIZE,
-            )));
-
             let mut seen: FxHashSet<u64> = FxHashSet::with_capacity_and_hasher(
                 PAGE_SLOTS * PAGE_RANGE_COUNT,
                 BuildHasherDefault::<FxHasher>::default(),
@@ -114,7 +108,7 @@ impl Table {
 
                 let range_dir = range_dir.write();
                 let range = range_dir.get(merge_range);
-                let merge_from = range.current_tail_page.load(Ordering::Relaxed);
+                let merge_from = range.current_tail_page.load(Ordering::SeqCst);
 
                 let last_page = Page::new(
                     page_dir
@@ -122,11 +116,12 @@ impl Table {
                         .get_page(merge_from)
                         .expect("Bad page ID for Page Range encountered in merge"),
                 )
-                .read_last_tail(&mut merge_pool.lock()) as usize;
+                .read_last_tail(&mut main_bufferpool.lock())
+                    as usize;
 
-                let merge_stop_at = range.merged_until.load(Ordering::Relaxed);
+                let merge_stop_at = range.merged_until.load(Ordering::SeqCst);
 
-                range.merged_until.store(last_page, Ordering::Relaxed);
+                range.merged_until.store(last_page, Ordering::SeqCst);
 
                 drop(range_dir);
 
@@ -140,12 +135,10 @@ impl Table {
                             .expect("Bad page ID for Page Range encountered in merge"),
                     );
 
-                    let mut tail_columns = (0..(NUM_METADATA_COLUMNS + num_columns))
-                        .map(|x| (tail_page.get_column(&mut merge_pool.lock(), x)))
-                        .collect::<Vec<Arc<BufferPoolFrame>>>();
-
                     for tail_slot in (0..PAGE_SLOTS).rev() {
-                        let base_rid = tail_columns[METADATA_BASE_RID].slot(tail_slot);
+                        let base_rid = tail_page
+                            .get_column(&mut main_bufferpool.lock(), METADATA_BASE_RID)
+                            .slot(tail_slot);
 
                         assert!(base_rid != RID_INVALID);
 
@@ -188,8 +181,7 @@ impl Table {
                                 let new_page_dir_entry =
                                     unsafe { new_page_dir_entry.assume_init() };
 
-                                let bp = &mut merge_pool.lock();
-
+                                let bp = &mut main_bufferpool.lock();
                                 for i in NUM_STATIC_COLUMNS..(NUM_METADATA_COLUMNS + num_columns) {
                                     let page = bp.get_page(base_cols[i]);
                                     let page_copy = bp.get_page(new_page_dir_entry[i]);
@@ -204,7 +196,6 @@ impl Table {
                                         .expect("Failed to acquire merge page lock");
 
                                     // println!("{:?}", page.page);
-                                    //println!("Page: {:?}", page.page);
 
                                     page_copy.page.clone_from_slice(&page.page);
                                 }
@@ -213,40 +204,29 @@ impl Table {
                             }),
                         ));
 
-                        let tid = tail_columns[METADATA_RID].slot(tail_slot);
+                        let bp = &mut main_bufferpool.lock();
+                        let tid = tail_page.get_column(bp, METADATA_RID).slot(tail_slot);
 
-                        let mut bp = &mut merge_pool.lock();
-
-                        let merged_columns = (NUM_STATIC_COLUMNS
-                            ..(NUM_METADATA_COLUMNS + num_columns))
-                            .map(|x| (merged_page.get_column(bp, x)))
-                            .collect::<Vec<Arc<BufferPoolFrame>>>();
-
-                        if merged_columns[METADATA_PAGE_HEADER - NUM_STATIC_COLUMNS].slot(0) > tid
-                            && tid != 0
-                        {
-                            merged_columns[METADATA_PAGE_HEADER - NUM_STATIC_COLUMNS]
-                                .write_slot(0, tid);
+                        if merged_page.read_page_tps(bp) > tid && tid != 0 {
+                            merged_page.write_page_tps(bp, tid);
                         }
 
-                        for i in 0..(NUM_METADATA_COLUMNS + num_columns - NUM_STATIC_COLUMNS) {
-                            let updated_value =
-                                tail_columns[i + NUM_STATIC_COLUMNS].slot(tail_slot);
-                            merged_columns[i].write_slot(RID::from(base_rid).slot(), updated_value);
+                        for i in (NUM_STATIC_COLUMNS + 1)..(NUM_METADATA_COLUMNS + num_columns) {
+                            let updated_value = tail_page.get_column(bp, i).slot(tail_slot);
+                            merged_page
+                                .get_column(bp, i)
+                                .write_slot(RID::from(base_rid).slot(), updated_value);
                         }
                     }
 
-                    tail_page_id = tail_columns[METADATA_PAGE_HEADER].slot(0) as usize;
+                    tail_page_id = tail_page.read_last_tail(&mut main_bufferpool.lock()) as usize;
                 }
 
-                std::thread::sleep(std::time::Duration::from_millis(4));
-
-                merge_pool.lock().flush_all();
+                main_bufferpool.lock().flush_all();
 
                 let mut page_dir = page_dir.write();
 
                 for pair in &merged {
-                    //println!("Merging page {}", *pair.0);
                     page_dir.replace_page(*pair.0, pair.1);
                 }
 
@@ -316,7 +296,10 @@ impl Table {
     pub fn persist(&mut self) {
         let merge_thread_handle = std::mem::replace(&mut self.merge_thread_handle, None).unwrap();
         drop(merge_thread_handle.1);
-        merge_thread_handle.0.join();
+        merge_thread_handle
+            .0
+            .join()
+            .expect("Failed to join merge thread");
 
         let header = TableHeaderPage {
             num_columns: self.num_columns,
@@ -1037,4 +1020,6 @@ impl Table {
         println!("{}", self.primary_key_index);
         println!("{}", self.index);
     }
+
+
 }
