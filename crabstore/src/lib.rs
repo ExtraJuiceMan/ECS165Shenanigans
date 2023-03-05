@@ -159,11 +159,7 @@ impl CrabStore {
         let crab_file = File::options().read(true).open(file);
 
         if crab_file.is_err() && crab_file.as_ref().unwrap_err().kind() == io::ErrorKind::NotFound {
-            File::options()
-                .write(true)
-                .create(true)
-                .open(file)
-                .expect("Failed to open database file");
+            File::create(file).expect("Failed to find database file");
 
             return Vec::new();
         }
@@ -173,18 +169,17 @@ impl CrabStore {
         let mut crab_bytes = Vec::new();
         crab_file.read_to_end(&mut crab_bytes).unwrap();
 
-        let table_names = unsafe {
+        unsafe {
             rkyv::from_bytes_unchecked::<Vec<String>>(&crab_bytes)
                 .expect("Failed to deserialize database file")
-        };
-
-        table_names
+        }
     }
 
     pub fn persist_table_index(file: &Path, table_names: Vec<String>) {
         let crab_file = File::options()
             .write(true)
             .truncate(true)
+            .create(true)
             .open(file)
             .expect("Failed to open database file");
 
@@ -244,22 +239,17 @@ impl CrabStore {
         }
     }
 
-    pub fn create_table(
-        &mut self,
-        name: String,
-        num_columns: usize,
-        key_index: usize,
-    ) -> Arc<Table> {
-        let mut table = Arc::new(Table::new(
-            name.clone(),
+    pub fn create_table(&mut self, name: &str, num_columns: usize, key_index: usize) -> Arc<Table> {
+        let table = Arc::new(Table::new(
+            name.to_string(),
             num_columns,
             key_index,
             &CrabStore::database_filename(&self.directory),
             &CrabStore::page_dir_filename(&self.directory, &name),
-            &CrabStore::index_filename(&self.directory, &name),
-            &CrabStore::range_filename(&self.directory, &name),
+            &CrabStore::index_filename(&self.directory, name),
+            &CrabStore::range_filename(&self.directory, name),
         ));
-        self.tables.insert(name.clone(), Arc::clone(&table));
+        self.tables.insert(name.to_string(), Arc::clone(&table));
         table
     }
 
@@ -272,8 +262,9 @@ impl CrabStore {
         self.tables.get(name).expect("Table not found")
     }
 
-    pub fn open(&mut self, path: String) {
-        fs::create_dir_all(&path).expect("Failed to create database directories.");
+    pub fn open(&mut self) {
+        fs::create_dir_all(&self.directory).expect("Failed to create database directories.");
+
         let table_names =
             CrabStore::load_table_index(&CrabStore::database_filename(&self.directory));
 
@@ -282,10 +273,10 @@ impl CrabStore {
                 name.to_string(),
                 Arc::new(Table::load(
                     name,
-                    &CrabStore::table_filename(&self.directory, &name),
-                    &CrabStore::page_dir_filename(&self.directory, &name),
-                    &CrabStore::index_filename(&self.directory, &name),
-                    &CrabStore::range_filename(&self.directory, &name),
+                    &CrabStore::table_filename(&self.directory, name),
+                    &CrabStore::page_dir_filename(&self.directory, name),
+                    &CrabStore::index_filename(&self.directory, name),
+                    &CrabStore::range_filename(&self.directory, name),
                 )),
             );
         }
@@ -294,12 +285,15 @@ impl CrabStore {
     pub fn close(&mut self) {
         let table_names = self.tables.keys().cloned().collect::<Vec<String>>();
 
-        CrabStore::persist_table_index(&self.directory, table_names);
+        CrabStore::persist_table_index(&CrabStore::database_filename(&self.directory), table_names);
 
         for table in self.tables.values() {
             table.persist();
         }
+
+        self.tables.clear();
     }
+
     fn delete(path: String) {
         fs::remove_dir_all(path).unwrap();
     }
@@ -386,13 +380,18 @@ impl CrabStorePy {
     pub fn close(&mut self) {
         let table_names = self.tables.keys().cloned().collect::<Vec<String>>();
 
-        CrabStore::persist_table_index(self.directory.as_ref().unwrap(), table_names);
+        CrabStore::persist_table_index(
+            &CrabStore::database_filename(self.directory.as_ref().unwrap()),
+            table_names,
+        );
 
         for table in self.tables.values() {
             Python::with_gil(|py| {
                 table.borrow(py).persist();
             })
         }
+
+        self.tables.clear();
     }
 }
 
@@ -405,51 +404,62 @@ fn crabstore(_py: Python, m: &PyModule) -> PyResult<()> {
     // m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
     Ok(())
 }
+
 #[cfg(test)]
 mod tests {
+    use tempfile::tempdir;
+
     use crate::CrabStore;
 
     #[test]
     fn open_close_db() {
-        let mut db = CrabStore::new();
-        db.open("test_db".to_string());
+        let dir = tempdir().expect("Failed to get temp directory");
+        let mut db = CrabStore::new(dir.path().into());
+        db.open();
         db.close();
-        CrabStore::delete("test_db".to_string());
     }
+
     #[test]
     fn create_table() {
-        let mut db = CrabStore::new();
-        db.open("test_db".to_string());
-        db.create_table("test_table".to_string(), 2, 0);
+        let dir = tempdir().expect("Failed to get temp directory");
+        let mut db = CrabStore::new(dir.path().into());
+        db.open();
+        db.create_table("test_table", 2, 0);
         db.close();
-        CrabStore::delete("test_db".to_string());
     }
     #[test]
     fn get_table() {
-        let mut db = CrabStore::new();
-        db.open("test_db".to_string());
-        let table1 = db.create_table("test_table".to_string(), 2, 0);
-        let table = db.get_table("test_table".to_string());
+        let dir = tempdir().expect("Failed to get temp directory");
+
+        let mut db = CrabStore::new(dir.path().into());
+        db.open();
+        db.create_table("test_table", 2, 0);
+        db.get_table("test_table");
         db.close();
-        CrabStore::delete("test_db".to_string());
+
+        db.open();
+        db.get_table("test_table");
+        assert_eq!(db.get_table("test_table").columns(), 2);
+        db.close();
     }
     #[test]
     fn check_aliasing() {
-        let mut db = CrabStore::new();
-        db.open("test_db".to_string());
-        let table1 = db.create_table("test_table".to_string(), 2, 0);
-        let table2 = db.get_table("test_table".to_string());
-        table1.write().unwrap().insert_query(vec![1, 2]);
-        table2.write().unwrap().insert_query(vec![3, 4]);
+        let dir = tempdir().expect("Failed to get temp directory");
+
+        let mut db = CrabStore::new(dir.path().into());
+        db.open();
+        let table1 = db.create_table("test_table", 2, 0);
+        let table2 = db.get_table("test_table");
+        table1.insert_query(vec![1, 2]);
+        table2.insert_query(vec![3, 4]);
         assert_eq!(
-            table1.read().unwrap().select_query(1, 0, &vec![1, 1]),
-            table2.read().unwrap().select_query(1, 0, &vec![1, 1])
+            table1.select_query(1, 0, &vec![1, 1]),
+            table2.select_query(1, 0, &vec![1, 1])
         );
         assert_eq!(
-            table1.read().unwrap().select_query(2, 0, &vec![1, 1]),
-            table2.read().unwrap().select_query(2, 0, &vec![1, 1])
+            table1.select_query(2, 0, &vec![1, 1]),
+            table2.select_query(2, 0, &vec![1, 1])
         );
         db.close();
-        CrabStore::delete("test_db".to_string());
     }
 }
