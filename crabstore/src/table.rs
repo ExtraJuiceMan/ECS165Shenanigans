@@ -478,7 +478,7 @@ impl Table {
         &self,
         search_value: u64,
         column_index: usize,
-        included_columns: &Vec<usize>,
+        included_columns: &[usize],
     ) -> Vec<RecordRust> {
         let vals: Vec<RID> = self.find_rows(column_index, search_value);
 

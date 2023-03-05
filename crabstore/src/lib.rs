@@ -11,6 +11,8 @@ use rkyv::ser::{
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
+    io::{Seek, SeekFrom},
+    os::windows::prelude::FileExt,
     str::FromStr,
     sync::{Arc, RwLock},
 };
@@ -149,7 +151,7 @@ impl RecordPy {
 }
 
 #[derive(Clone, Debug, Default)]
-struct CrabStore {
+pub struct CrabStore {
     directory: PathBuf,
     tables: HashMap<String, Arc<Table>>,
 }
@@ -166,6 +168,8 @@ impl CrabStore {
 
         let mut crab_file = crab_file.unwrap();
 
+        crab_file.rewind().unwrap();
+
         let mut crab_bytes = Vec::new();
         crab_file.read_to_end(&mut crab_bytes).unwrap();
 
@@ -176,15 +180,21 @@ impl CrabStore {
     }
 
     pub fn persist_table_index(file: &Path, table_names: Vec<String>) {
-        let crab_file = File::options()
+        let mut crab_file = File::options()
             .write(true)
             .truncate(true)
             .create(true)
             .open(file)
             .expect("Failed to open database file");
 
+        crab_file.rewind().unwrap();
+
+        let mut bufwriter = BufWriter::new(crab_file);
+
+        bufwriter.rewind().unwrap();
+
         let mut serializer = CompositeSerializer::new(
-            WriteSerializer::new(BufWriter::new(crab_file)),
+            WriteSerializer::new(bufwriter),
             AllocScratch::default(),
             SharedSerializeMap::new(),
         );
@@ -366,9 +376,9 @@ impl CrabStorePy {
                         TablePy::load(
                             name,
                             &CrabStore::database_filename(self.directory.as_ref().unwrap()),
-                            &CrabStore::page_dir_filename(self.directory.as_ref().unwrap(), &name),
-                            &CrabStore::index_filename(self.directory.as_ref().unwrap(), &name),
-                            &CrabStore::range_filename(self.directory.as_ref().unwrap(), &name),
+                            &CrabStore::page_dir_filename(self.directory.as_ref().unwrap(), name),
+                            &CrabStore::index_filename(self.directory.as_ref().unwrap(), name),
+                            &CrabStore::range_filename(self.directory.as_ref().unwrap(), name),
                         ),
                     )
                     .unwrap(),
@@ -427,21 +437,27 @@ mod tests {
         db.create_table("test_table", 2, 0);
         db.close();
     }
+
     #[test]
     fn get_table() {
         let dir = tempdir().expect("Failed to get temp directory");
 
         let mut db = CrabStore::new(dir.path().into());
         db.open();
+
         db.create_table("test_table", 2, 0);
         db.get_table("test_table");
+
         db.close();
 
         db.open();
+
         db.get_table("test_table");
         assert_eq!(db.get_table("test_table").columns(), 2);
+
         db.close();
     }
+
     #[test]
     fn check_aliasing() {
         let dir = tempdir().expect("Failed to get temp directory");
