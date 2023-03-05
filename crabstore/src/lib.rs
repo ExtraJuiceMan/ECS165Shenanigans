@@ -62,6 +62,7 @@ pub struct Record {
     schema_encoding: u64,
     columns: Py<PyList>,
 }
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RecordRust {
     rid: u64,
     indirection: u64,
@@ -292,6 +293,9 @@ impl CrabStore {
             table.write().unwrap().persist();
         }
     }
+    fn delete(path: String) {
+        fs::remove_dir_all(path).unwrap();
+    }
 }
 #[derive(Clone, Debug)]
 #[pyclass]
@@ -478,4 +482,52 @@ fn crabstore(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<CrabStorePy>()?;
     // m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use crate::CrabStore;
+
+    #[test]
+    fn open_close_db() {
+        let mut db = CrabStore::new();
+        db.open("test_db".to_string());
+        db.close();
+        CrabStore::delete("test_db".to_string());
+    }
+    #[test]
+    fn create_table() {
+        let mut db = CrabStore::new();
+        db.open("test_db".to_string());
+        db.create_table("test_table".to_string(), 2, 0);
+        db.close();
+        CrabStore::delete("test_db".to_string());
+    }
+    #[test]
+    fn get_table() {
+        let mut db = CrabStore::new();
+        db.open("test_db".to_string());
+        let table1 = db.create_table("test_table".to_string(), 2, 0);
+        let table = db.get_table("test_table".to_string());
+        db.close();
+        CrabStore::delete("test_db".to_string());
+    }
+    #[test]
+    fn check_aliasing() {
+        let mut db = CrabStore::new();
+        db.open("test_db".to_string());
+        let table1 = db.create_table("test_table".to_string(), 2, 0);
+        let table2 = db.get_table("test_table".to_string());
+        table1.write().unwrap().insert_query(vec![1, 2]);
+        table2.write().unwrap().insert_query(vec![3, 4]);
+        assert_eq!(
+            table1.read().unwrap().select_query(1, 0, &vec![1, 1]),
+            table2.read().unwrap().select_query(1, 0, &vec![1, 1])
+        );
+        assert_eq!(
+            table1.read().unwrap().select_query(2, 0, &vec![1, 1]),
+            table2.read().unwrap().select_query(2, 0, &vec![1, 1])
+        );
+        db.close();
+        CrabStore::delete("test_db".to_string());
+    }
 }

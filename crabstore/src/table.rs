@@ -59,7 +59,7 @@ pub struct Table {
     name: String,
     num_columns: usize,
     primary_key_index: usize,
-    index: Index,
+    index: RwLock<Index>,
     next_rid: AtomicU64,
     next_tid: AtomicU64,
     page_dir: Arc<RwLock<PageDirectory>>,
@@ -267,7 +267,7 @@ impl Table {
             name,
             num_columns,
             primary_key_index: key_index,
-            index: Index::new(key_index, num_columns, Path::new(&id_file)),
+            index: RwLock::new(Index::new(key_index, num_columns, Path::new(&id_file))),
             next_rid: 0.into(),
             next_tid: (!0 - 1).into(),
             page_dir,
@@ -299,7 +299,7 @@ impl Table {
 
         disk.set_free_page_pointer(header.next_free_page);
 
-        let index = Index::load(id_file);
+        let index = RwLock::new(Index::load(id_file));
         let page_dir = Arc::new(RwLock::new(PageDirectory::load(pd_file)));
         let range_dir = Arc::new(RwLock::new(RangeDirectory::load(rd_file)));
         let bufferpool = Arc::new(Mutex::new(BufferPool::new(
@@ -344,7 +344,7 @@ impl Table {
             next_rid: self.next_rid.load(Ordering::Relaxed),
             next_tid: self.next_tid.load(Ordering::Relaxed),
             next_free_page: self.disk.free_page_pointer(),
-            indexed_columns: self.index.index_meta_to_bit_vector(),
+            indexed_columns: self.index.read().index_meta_to_bit_vector(),
         };
 
         let mut page = [0; PAGE_SIZE];
@@ -365,7 +365,7 @@ impl Table {
         let range_dir = self.range_dir.write();
         range_dir.persist();
 
-        self.index.persist();
+        self.index.read().persist();
     }
 
     pub fn next_tid(&self, range_id: usize) -> RID {
@@ -439,7 +439,7 @@ impl Table {
     }
 
     fn find_row(&self, column_index: usize, value: u64) -> Option<RID> {
-        match self.index.get_from_index(column_index, value) {
+        match self.index.read().get_from_index(column_index, value) {
             Some(vals) => vals
                 .iter()
                 .find(|x| {
@@ -489,7 +489,7 @@ impl Table {
     }
 
     fn find_rows(&self, column_index: usize, value: u64) -> Vec<RID> {
-        match self.index.get_from_index(column_index, value) {
+        match self.index.read().get_from_index(column_index, value) {
             Some(vals) => vals
                 .into_iter()
                 .filter(|x| {
@@ -543,7 +543,11 @@ impl Table {
         column_index: usize,
         range: impl RangeBounds<u64> + Clone,
     ) -> Vec<RID> {
-        match self.index.range_from_index(column_index, range.clone()) {
+        match self
+            .index
+            .read()
+            .range_from_index(column_index, range.clone())
+        {
             Some(vals) => vals,
             None => {
                 let mut rids: Vec<RID> = Vec::new();
@@ -682,7 +686,7 @@ impl Table {
             })
             .collect()
     }
-    pub fn insert_query(&mut self, values: Vec<u64>) {
+    pub fn insert_query(&self, values: Vec<u64>) {
         let rid: RID = self.next_rid.fetch_add(1, Ordering::Relaxed).into();
 
         let page_dir = self.page_dir.read();
@@ -750,7 +754,9 @@ impl Table {
         }
 
         for i in 0..self.num_columns {
-            self.index.update_index(i, *values.get(i).unwrap(), rid);
+            self.index
+                .write()
+                .update_index(i, *values.get(i).unwrap(), rid);
         }
     }
 
@@ -844,9 +850,9 @@ impl Table {
         for (i, v) in values.iter().enumerate() {
             if !v.is_none() {
                 schema_encoding |= 1 << i;
-                self.index.update_index(i, v.unwrap(), base_rid);
+                self.index.write().update_index(i, v.unwrap(), base_rid);
                 if (old_schema_encoding & (1 << i)) == 1 || old_latest_rid.is_invalid() {
-                    self.index.remove_index(
+                    self.index.write().remove_index(
                         i,
                         base_page
                             .get_column(
@@ -857,7 +863,7 @@ impl Table {
                         base_rid,
                     );
                 } else if !old_latest_rid.is_invalid() && (old_schema_encoding & (1 << i)) == 1 {
-                    self.index.remove_index(
+                    self.index.write().remove_index(
                         i,
                         self.get_page(old_latest_rid)
                             .get_column(
@@ -921,7 +927,7 @@ impl Table {
         true
     }
     pub fn build_index(&mut self, column_num: usize) {
-        self.index.create_index(column_num);
+        self.index.write().create_index(column_num);
         let mut rid: RID = 0.into();
         let max_rid = self.next_rid.load(Ordering::Relaxed);
         while rid.raw() < max_rid {
@@ -935,7 +941,7 @@ impl Table {
             }
 
             let latest = self.get_latest(rid);
-            self.index.update_index(
+            self.index.write().update_index(
                 column_num,
                 self.get_page(latest)
                     .get_column(
@@ -949,13 +955,13 @@ impl Table {
         }
     }
     pub fn drop_index(&mut self, column_num: usize) {
-        self.index.drop_index(column_num);
+        self.index.write().drop_index(column_num);
     }
     pub fn print(&self) {
         println!("{}", self.name);
         println!("{}", self.num_columns);
         println!("{}", self.primary_key_index);
-        println!("{}", self.index);
+        println!("{}", self.index.read());
     }
 
 
