@@ -1,5 +1,6 @@
 use crate::rid::RID;
 use core::fmt;
+use dashmap::DashMap;
 use pyo3::prelude::*;
 use rkyv::{
     de::deserializers::SharedDeserializeMap,
@@ -10,6 +11,7 @@ use rkyv::{
     Archive, Deserialize, Serialize,
 };
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
+use std::hash::Hash;
 use std::{
     collections::BTreeMap,
     fmt::Debug,
@@ -19,12 +21,12 @@ use std::{
     sync::RwLock,
 };
 use std::{fs::File, path::Path};
-pub trait Indexable<K: Debug + Ord, V: Debug>: Send + Sync + 'static {
+pub trait Indexable<K: Debug + Ord + Hash, V: Debug>: Send + Sync + 'static {
     fn update(&self, key: K, rid: V);
     fn get(&self, key: &K) -> Option<&Vec<V>>;
     fn get_range(&self, start: K, end: K) -> Vec<V>;
     fn remove(&self, key: K, value: V);
-    fn iter(&self) -> Box<dyn Iterator<Item = (K, V)> + '_>;
+    fn iter(&self) -> Box<dyn Iterator<Item = (&K, &Vec<V>)> + '_>;
     fn new() -> Self
     where
         Self: Sized;
@@ -35,12 +37,13 @@ impl Debug for dyn Indexable<u64, RID> {
     }
 }
 #[derive(Archive, serde::Serialize, serde::Deserialize)]
-pub struct BTreeIndex<K, V> {
+pub struct BTreeIndex<K: Ord, V> {
     index: RwLock<BTreeMap<K, Vec<V>>>,
 }
+
 impl<K, V> Indexable<K, V> for BTreeIndex<K, V>
 where
-    K: Debug + Sync + Send + Ord + Clone + 'static,
+    K: Debug + Sync + Send + Ord + Hash + Clone + 'static,
     V: Debug + Sync + Send + Ord + Clone + 'static,
 {
     fn update(&self, key: K, value: V) {
@@ -69,14 +72,8 @@ where
         }
     }
 
-    fn iter(&self) -> Box<dyn Iterator<Item = (K, V)> + '_> {
-        Box::new(self.index.read().unwrap().iter().flat_map(|(k, v)| {
-            v.iter().map(move |x| {
-                let k = k.clone();
-                let x = x.clone();
-                (k, x)
-            })
-        }))
+    fn iter(&self) -> Box<dyn Iterator<Item = (&K, &Vec<V>)> + '_> {
+        Box::new(self.index.read().unwrap().iter())
     }
     fn new() -> Self
     where
@@ -84,6 +81,52 @@ where
     {
         Self {
             index: RwLock::new(BTreeMap::new()),
+        }
+    }
+}
+pub struct DashMapIndex<K: Ord, V> {
+    index: DashMap<K, Vec<V>>,
+}
+impl<K, V> Indexable<K, V> for DashMapIndex<K, V>
+where
+    K: Debug + Sync + Send + Hash + Ord + Clone + 'static,
+    V: Debug + Sync + Send + Ord + Clone + 'static,
+{
+    fn update(&self, key: K, value: V) {
+        if let Some(ref mut rids) = self.index.get_mut(&key) {
+            rids.push(value);
+        } else {
+            let mut vec = Vec::with_capacity(4);
+            vec.push(value);
+            self.index.insert(key, vec);
+        }
+    }
+    fn get(&self, key: &K) -> Option<&Vec<V>> {
+        self.index.get(key).map(|x| x.value())
+    }
+    fn get_range(&self, start: K, end: K) -> Vec<V> {
+        let range = start..=end;
+        self.index
+            .iter()
+            .filter(|x| range.contains(x.key()))
+            .flat_map(|item| item.value().clone())
+            .collect::<Vec<V>>()
+    }
+    fn remove(&self, key: K, value: V) {
+        if let Some(ref mut rids) = self.index.get_mut(&key) {
+            rids.retain(|x| *x != value);
+        }
+    }
+
+    fn iter(&self) -> Box<dyn Iterator<Item = (&K, &Vec<V>)> + '_> {
+        Box::new(self.index.iter().map(|(x)| (x.key(), x.value())))
+    }
+    fn new() -> Self
+    where
+        Self: Sized,
+    {
+        Self {
+            index: DashMap::new(),
         }
     }
 }

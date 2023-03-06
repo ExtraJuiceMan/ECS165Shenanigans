@@ -1,4 +1,4 @@
-use crate::index::{BTreeIndex, Index};
+use crate::index::{BTreeIndex, DashMapIndex, Index};
 use crate::RID_INVALID;
 use crate::{
     bufferpool::{BufferPool, BufferPoolFrame},
@@ -776,7 +776,11 @@ impl Table {
     }
     pub fn build_index(&self, column_num: usize) {
         let mut index = self.index;
-        index.create_index::<BTreeIndex<u64, RID>>(column_num);
+        if column_num == self.primary_key_index {
+            index.create_index::<BTreeIndex<u64, RID>>(column_num);
+        } else {
+            index.create_index::<DashMapIndex<u64, RID>>(column_num);
+        }
         let mut rid: RID = 0.into();
         let max_rid = self.next_rid.load(Ordering::Relaxed);
         while rid.raw() < max_rid {
