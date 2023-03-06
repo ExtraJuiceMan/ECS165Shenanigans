@@ -12,7 +12,6 @@ use std::{
     borrow::BorrowMut,
     collections::HashMap,
     io::{Seek, SeekFrom},
-    os::windows::prelude::FileExt,
     str::FromStr,
     sync::{Arc, RwLock},
 };

@@ -7,29 +7,98 @@ use rkyv::{
         serializers::{AllocScratch, CompositeSerializer, SharedSerializeMap, WriteSerializer},
         Serializer,
     },
-    Deserialize,
+    Archive, Deserialize, Serialize,
 };
+use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use std::{
     collections::BTreeMap,
+    fmt::Debug,
     io::{BufWriter, Read, Write},
-    ops::RangeBounds,
+    ops::{Bound, RangeBounds},
     path::PathBuf,
+    sync::RwLock,
 };
 use std::{fs::File, path::Path};
+pub trait Indexable<K: Debug + Ord, V: Debug>: Send + Sync + 'static {
+    fn update(&self, key: K, rid: V);
+    fn get(&self, key: &K) -> Option<&Vec<V>>;
+    fn get_range(&self, start: K, end: K) -> Vec<V>;
+    fn remove(&self, key: K, value: V);
+    fn iter(&self) -> Box<dyn Iterator<Item = (K, V)> + '_>;
+    fn new() -> Self
+    where
+        Self: Sized;
+}
+impl Debug for dyn Indexable<u64, RID> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Indexable")
+    }
+}
+#[derive(Archive, serde::Serialize, serde::Deserialize)]
+pub struct BTreeIndex<K, V> {
+    index: RwLock<BTreeMap<K, Vec<V>>>,
+}
+impl<K, V> Indexable<K, V> for BTreeIndex<K, V>
+where
+    K: Debug + Sync + Send + Ord + Clone + 'static,
+    V: Debug + Sync + Send + Ord + Clone + 'static,
+{
+    fn update(&self, key: K, value: V) {
+        if let Some(ref mut rids) = self.index.write().unwrap().get_mut(&key) {
+            rids.push(value);
+        } else {
+            let mut vec = Vec::with_capacity(4);
+            vec.push(value);
+            self.index.write().unwrap().insert(key, vec);
+        }
+    }
+    fn get(&self, key: &K) -> Option<&Vec<V>> {
+        self.index.read().unwrap().get(key)
+    }
+    fn get_range(&self, start: K, end: K) -> Vec<V> {
+        self.index
+            .read()
+            .unwrap()
+            .range(start..=end)
+            .flat_map(|item| item.1.clone())
+            .collect::<Vec<V>>()
+    }
+    fn remove(&self, key: K, value: V) {
+        if let Some(ref mut rids) = self.index.write().unwrap().get_mut(&key) {
+            rids.retain(|x| *x != value);
+        }
+    }
 
-#[derive(Clone, Debug, Default)]
-#[pyclass(subclass)]
+    fn iter(&self) -> Box<dyn Iterator<Item = (K, V)> + '_> {
+        Box::new(self.index.read().unwrap().iter().flat_map(|(k, v)| {
+            v.iter().map(move |x| {
+                let k = k.clone();
+                let x = x.clone();
+                (k, x)
+            })
+        }))
+    }
+    fn new() -> Self
+    where
+        Self: Sized,
+    {
+        Self {
+            index: RwLock::new(BTreeMap::new()),
+        }
+    }
+}
+#[derive(Debug)]
 //change to BTreeMap when we need to implement ranges
 pub struct Index {
     path: PathBuf,
-    indices: Vec<Option<BTreeMap<u64, Vec<RID>>>>,
+    indices: Vec<Option<Box<dyn Indexable<u64, RID>>>>,
 }
 
 impl fmt::Display for Index {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for (i, v) in self.indices.iter().enumerate() {
             write!(f, "Index on Column {}:\n", i).unwrap();
-            match v {
+            match &v {
                 Some(v) => {
                     for (key, value) in v.iter() {
                         write!(f, "Key: {} | Value: {:?}\n", key, value)?;
@@ -47,9 +116,10 @@ impl fmt::Display for Index {
 
 impl Index {
     pub fn new(key_index: usize, num_columns: usize, path: &Path) -> Self {
-        let mut indices = Vec::with_capacity(num_columns);
+        let mut indices: Vec<Option<Box<dyn Indexable<u64, RID>>>> =
+            Vec::with_capacity(num_columns);
         indices.resize_with(num_columns, Default::default);
-        indices[key_index] = Some(BTreeMap::new());
+        indices[key_index] = Some(Box::new(BTreeIndex::new()));
 
         Index {
             path: path.into(),
@@ -70,7 +140,7 @@ impl Index {
             .expect("Unable to read index file");
 
         let archived =
-            unsafe { rkyv::archived_root::<Vec<Option<BTreeMap<u64, Vec<RID>>>>>(&id_bytes) };
+            unsafe { rkyv::archived_root::<Vec<Option<&dyn Indexable<u64, Vec<RID>>>>>(&id_bytes) };
 
         Index {
             path: path.into(),
@@ -105,21 +175,13 @@ impl Index {
 
     pub fn update_index(&mut self, column_number: usize, value: u64, rid: RID) {
         if let Some(ref mut index) = self.indices[column_number] {
-            if let Some(ref mut rids) = index.get_mut(&value) {
-                rids.push(rid);
-            } else {
-                let mut vec = Vec::with_capacity(4);
-                vec.push(rid);
-                index.insert(value, vec);
-            }
+            index.update(value, rid);
         }
     }
 
     pub fn remove_index(&mut self, column_number: usize, value: u64, rid: RID) {
         if let Some(ref mut index) = self.indices[column_number] {
-            if let Some(ref mut rids) = index.get_mut(&value) {
-                rids.retain(|x| x.raw() != rid.raw());
-            }
+            index.remove(value, rid);
         }
     }
 
@@ -132,20 +194,14 @@ impl Index {
             })
     }
 
-    pub fn range_from_index(
-        &self,
-        column_number: usize,
-        range: impl RangeBounds<u64>,
-    ) -> Option<Vec<RID>> {
-        self.indices[column_number].as_ref().map(|map| {
-            map.range(range)
-                .flat_map(|item| item.1.clone())
-                .collect::<Vec<RID>>()
-        })
+    pub fn range_from_index(&self, column_number: usize, start: u64, end: u64) -> Option<Vec<RID>> {
+        self.indices[column_number]
+            .as_ref()
+            .map(|map| map.get_range(start, end))
     }
 
-    pub fn create_index(&mut self, column_number: usize) {
-        self.indices[column_number] = Some(BTreeMap::new());
+    pub fn create_index<T: Indexable<u64, RID>>(&mut self, column_number: usize) {
+        self.indices[column_number] = Some(Box::new(T::new()));
     }
 
     pub fn drop_index(&mut self, column_number: usize) {

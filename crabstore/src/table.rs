@@ -1,3 +1,5 @@
+use crate::index::{BTreeIndex, Index};
+use crate::RID_INVALID;
 use crate::{
     bufferpool::{BufferPool, BufferPoolFrame},
     disk_manager::DiskManager,
@@ -7,7 +9,6 @@ use crate::{
     BUFFERPOOL_SIZE, METADATA_BASE_RID, METADATA_PAGE_HEADER, NUM_STATIC_COLUMNS, PAGE_RANGE_COUNT,
     PAGE_SIZE, PAGE_SLOTS,
 };
-use crate::{index::Index, RID_INVALID};
 use crate::{
     page::{Page, PageRange},
     page_directory::PageDirectory,
@@ -57,7 +58,7 @@ pub struct Table {
     name: String,
     num_columns: usize,
     primary_key_index: usize,
-    index: RwLock<Index>,
+    index: Index,
     next_rid: AtomicU64,
     next_tid: AtomicU64,
     page_dir: Arc<RwLock<PageDirectory>>,
@@ -92,7 +93,7 @@ impl Table {
             name,
             num_columns,
             primary_key_index: key_index,
-            index: RwLock::new(Index::new(key_index, num_columns, id_file)),
+            index: Index::new(key_index, num_columns, id_file),
             next_rid: 0.into(),
             next_tid: (!0 - 1).into(),
             page_dir,
@@ -125,7 +126,7 @@ impl Table {
 
         disk.set_free_page_pointer(header.next_free_page);
 
-        let index = RwLock::new(Index::load(id_file));
+        let index = Index::load(id_file);
         let page_dir = Arc::new(RwLock::new(PageDirectory::load(pd_file)));
         let range_dir = Arc::new(RwLock::new(RangeDirectory::load(rd_file)));
         let bufferpool = Arc::new(Mutex::new(BufferPool::new(
@@ -192,7 +193,7 @@ impl Table {
         let range_dir = self.range_dir.write();
         range_dir.persist();
 
-        let index = self.index.write();
+        let index = self.index;
         index.persist();
     }
 
@@ -268,7 +269,7 @@ impl Table {
     }
 
     fn find_row(&self, column_index: usize, value: u64) -> Option<RID> {
-        match self.index.read().get_from_index(column_index, value) {
+        match self.index.get_from_index(column_index, value) {
             Some(vals) => vals
                 .iter()
                 .find(|x| {
@@ -318,7 +319,7 @@ impl Table {
     }
 
     fn find_rows(&self, column_index: usize, value: u64) -> Vec<RID> {
-        match self.index.read().get_from_index(column_index, value) {
+        match self.index.get_from_index(column_index, value) {
             Some(vals) => vals
                 .into_iter()
                 .filter(|x| {
@@ -367,22 +368,14 @@ impl Table {
         }
     }
 
-    fn find_rows_range(
-        &self,
-        column_index: usize,
-        range: impl RangeBounds<u64> + Clone,
-    ) -> Vec<RID> {
-        match self
-            .index
-            .read()
-            .range_from_index(column_index, range.clone())
-        {
+    fn find_rows_range(&self, column_index: usize, start: u64, end: u64) -> Vec<RID> {
+        match self.index.range_from_index(column_index, start, end) {
             Some(vals) => vals,
             None => {
                 let mut rids: Vec<RID> = Vec::new();
                 let mut rid: RID = 0.into();
                 let next_rid = self.next_rid.load(Ordering::Relaxed);
-
+                let range = start..=end;
                 while rid.raw() < next_rid {
                     let key = self
                         .get_page(rid)
@@ -603,7 +596,7 @@ impl Table {
             .write_slot(rid.slot(), *val);
         }
 
-        let mut index = self.index.write();
+        let mut index = self.index;
         for i in 0..self.num_columns {
             index.update_index(i, values[i], rid);
         }
@@ -612,7 +605,7 @@ impl Table {
     pub fn sum_query(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
         let mut sum: u64 = 0;
         for rid in self
-            .find_rows_range(column_index, RangeInclusive::new(start_range, end_range))
+            .find_rows_range(column_index, start_range, end_range)
             .iter()
         {
             let latest = self.get_latest_with_bp(&mut self.bufferpool.lock(), *rid);
@@ -701,7 +694,7 @@ impl Table {
         for (i, v) in values.iter().enumerate() {
             if !v.is_none() {
                 schema_encoding |= 1 << i;
-                let mut index = self.index.write();
+                let mut index = self.index;
 
                 index.update_index(i, v.unwrap(), base_rid);
                 if (old_schema_encoding & (1 << i)) == 1 || old_latest_rid.is_invalid() {
@@ -716,7 +709,7 @@ impl Table {
                         base_rid,
                     );
                 } else if !old_latest_rid.is_invalid() && (old_schema_encoding & (1 << i)) == 1 {
-                    let mut index = self.index.write();
+                    let mut index = self.index;
 
                     index.remove_index(
                         i,
@@ -782,8 +775,8 @@ impl Table {
         true
     }
     pub fn build_index(&self, column_num: usize) {
-        let mut index = self.index.write();
-        index.create_index(column_num);
+        let mut index = self.index;
+        index.create_index::<BTreeIndex<u64, RID>>(column_num);
         let mut rid: RID = 0.into();
         let max_rid = self.next_rid.load(Ordering::Relaxed);
         while rid.raw() < max_rid {
@@ -812,7 +805,7 @@ impl Table {
     }
 
     pub fn drop_index(&self, column_num: usize) {
-        self.index.write().drop_index(column_num);
+        self.index.drop_index(column_num);
     }
 }
 

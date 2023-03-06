@@ -17,6 +17,7 @@ parking_lot = "0.12.1"
 rustc-hash = "1.1.0"
 dashmap = "5.4.0"
 tempfile = "3.4.0"
+serde = {version = "1.0.152", features = ["derive"]}
 
 [profile.release-with-debug]
 inherits = "release"
