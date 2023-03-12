@@ -1,4 +1,7 @@
+use std::{collections::HashMap, path::Path};
+
 use crabstore::*;
+use rand::prelude::*;
 use tempfile::tempdir;
 
 #[test]
@@ -163,3 +166,45 @@ const NUMBER_OF_RECORDS: u64 = 1000;
 const NUMBER_OF_AGGREGATES: u64 = 100;
 const NUMBER_OF_UPDATES: u64 = 1;
 
+fn durability_tester1(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, keys: Vec<u64>) {
+    let mut crabstore = CrabStore::new(directory.to_path_buf());
+    crabstore.open();
+
+    let table = crabstore.create_table("Grades", 5, 0);
+
+    let mut rand = StdRng::seed_from_u64(3562901);
+
+    for i in 0..NUMBER_OF_RECORDS {
+        let key = 92106429 + i;
+        let record = vec![
+            key,
+            rand.gen_range(0..20),
+            rand.gen_range(0..20),
+            rand.gen_range(0..20),
+            rand.gen_range(0..20),
+        ];
+        table.insert_query(&record);
+        records.insert(key, record);
+    }
+
+    for key in keys.iter() {
+        let record = &table.select_query(*key, 0, &[1, 1, 1, 1, 1])[0].columns;
+        for (i, column) in record.iter().enumerate() {
+            assert_eq!(*column, records.get(key).unwrap()[i]);
+        }
+    }
+
+    for _ in 0..NUMBER_OF_UPDATES {
+        for key in keys.iter() {
+            let mut updated_columns = [None, None, None, None, None];
+            let original = records.get(key).unwrap().clone();
+            for i in 1..table.columns() {
+                let val = rand.gen_range(0..20);
+                updated_columns[i] = Some(val);
+                records.get_mut(key).unwrap()[i] = val;
+            }
+            table.update_query(*key, &updated_columns);
+            let record = table.select_query(key, column_index, included_columns)
+        }
+    }
+}
