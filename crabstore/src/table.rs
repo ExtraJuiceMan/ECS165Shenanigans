@@ -324,7 +324,7 @@ impl Table {
                 .filter(|x| {
                     self.get_page(*x)
                         .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
-                        .slot(x.page())
+                        .slot(x.slot())
                         != RID_INVALID
                 })
                 .collect(),
@@ -631,8 +631,8 @@ impl Table {
     pub fn update_query(&self, key: u64, values: &[Option<u64>]) -> bool {
         let row = self.find_row(self.primary_key_index, key);
 
-        if let Some(_pk) = values[self.primary_key_index] {
-            if row.is_some() {
+        if let Some(pk) = values[self.primary_key_index] {
+            if self.find_row(self.primary_key_index, pk).is_some() {
                 return false;
             }
         }
@@ -747,6 +747,7 @@ impl Table {
 
         true
     }
+
     pub fn delete_query(&self, key: u64) -> bool {
         let row = self.find_row(self.primary_key_index, key);
 
