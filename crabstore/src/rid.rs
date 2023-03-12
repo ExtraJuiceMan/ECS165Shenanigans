@@ -2,7 +2,9 @@ use rkyv::{Archive, Deserialize, Serialize};
 
 use crate::PAGE_RANGE_COUNT;
 
-#[derive(Archive, Serialize, Deserialize, Clone, Copy, Debug, Default)]
+#[derive(
+    Archive, Serialize, Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd,
+)]
 pub struct RID(pub u64);
 
 impl RID {

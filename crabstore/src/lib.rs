@@ -12,7 +12,6 @@ use std::{
     borrow::BorrowMut,
     collections::HashMap,
     io::{Seek, SeekFrom},
-    os::windows::prelude::FileExt,
     str::FromStr,
     sync::{Arc, RwLock},
 };
@@ -254,8 +253,8 @@ impl CrabStore {
             name.to_string(),
             num_columns,
             key_index,
-            &CrabStore::database_filename(&self.directory),
-            &CrabStore::page_dir_filename(&self.directory, &name),
+            &CrabStore::table_filename(&self.directory, name),
+            &CrabStore::page_dir_filename(&self.directory, name),
             &CrabStore::index_filename(&self.directory, name),
             &CrabStore::range_filename(&self.directory, name),
         ));
@@ -375,7 +374,7 @@ impl CrabStorePy {
                         py,
                         TablePy::load(
                             name,
-                            &CrabStore::database_filename(self.directory.as_ref().unwrap()),
+                            &CrabStore::table_filename(self.directory.as_ref().unwrap(), name),
                             &CrabStore::page_dir_filename(self.directory.as_ref().unwrap(), name),
                             &CrabStore::index_filename(self.directory.as_ref().unwrap(), name),
                             &CrabStore::range_filename(self.directory.as_ref().unwrap(), name),
