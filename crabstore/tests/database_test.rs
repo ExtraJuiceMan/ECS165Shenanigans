@@ -30,13 +30,13 @@ fn verify() {
             .map(|x| Some(x + i))
             .collect::<Vec<Option<u64>>>();
 
-        new_values[0] = Some(i);
+        new_values[0] = None;
 
         grades.update_query(i, &new_values);
     }
 
     let selected = grades.select_query(19965, 0, &[1, 1, 1, 1]);
-    assert_eq!(selected[0].columns, [19968, 19967, 19968, 19969]);
+    assert_eq!(selected[0].columns, [19965, 19967, 19968, 19969]);
     drop(grades);
 
     crabstore.close();
