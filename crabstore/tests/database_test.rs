@@ -1,8 +1,10 @@
-use std::{collections::HashMap, path::Path};
-
+#![feature(test)]
+extern crate test;
 use crabstore::*;
 use rand::prelude::*;
+use std::{collections::HashMap, path::Path};
 use tempfile::tempdir;
+use test::Bencher;
 
 #[test]
 fn verify() {

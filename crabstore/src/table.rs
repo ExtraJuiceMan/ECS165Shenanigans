@@ -61,7 +61,7 @@ pub struct Table {
     next_rid: AtomicU64,
     next_tid: AtomicU64,
     page_dir: Arc<RwLock<PageDirectory>>,
-    range_dir: Arc<RwLock<RangeDirectory>>,
+    range_dir: Arc<Mutex<RangeDirectory>>,
     bufferpool: Arc<Mutex<BufferPool>>,
     disk: Arc<DiskManager>,
     merge_thread_handle: Mutex<Option<(JoinHandle<()>, Sender<usize>)>>,
@@ -78,7 +78,7 @@ impl Table {
         rd_file: &Path,
     ) -> Table {
         let page_dir = Arc::new(RwLock::new(PageDirectory::new(pd_file)));
-        let range_dir = Arc::new(RwLock::new(RangeDirectory::new(rd_file)));
+        let range_dir = Arc::new(Mutex::new(RangeDirectory::new(rd_file)));
 
         let disk = Arc::new(DiskManager::new(db_file).unwrap());
         let bufferpool = Arc::new(Mutex::new(BufferPool::new(
@@ -127,7 +127,7 @@ impl Table {
 
         let index = RwLock::new(Index::load(id_file));
         let page_dir = Arc::new(RwLock::new(PageDirectory::load(pd_file)));
-        let range_dir = Arc::new(RwLock::new(RangeDirectory::load(rd_file)));
+        let range_dir = Arc::new(Mutex::new(RangeDirectory::load(rd_file)));
         let bufferpool = Arc::new(Mutex::new(BufferPool::new(
             Arc::clone(&disk),
             BUFFERPOOL_SIZE,
@@ -189,7 +189,7 @@ impl Table {
         let page_dir = self.page_dir.write();
         page_dir.persist();
 
-        let range_dir = self.range_dir.write();
+        let range_dir = self.range_dir.lock();
         range_dir.persist();
 
         let index = self.index.write();
@@ -197,7 +197,7 @@ impl Table {
     }
 
     pub fn next_tid(&self, range_id: usize) -> RID {
-        let mut range_dir = self.range_dir.write();
+        let mut range_dir = self.range_dir.lock();
 
         if range_id >= range_dir.next_range_id() {
             assert!(range_id == range_dir.next_range_id());

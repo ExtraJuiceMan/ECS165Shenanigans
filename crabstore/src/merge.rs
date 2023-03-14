@@ -21,7 +21,7 @@ use crate::{
 impl Table {
     pub fn spawn_merge_thread(
         page_directory: &Arc<RwLock<PageDirectory>>,
-        range_directory: &Arc<RwLock<RangeDirectory>>,
+        range_directory: &Arc<Mutex<RangeDirectory>>,
         disk_manager: &Arc<DiskManager>,
         main_bufferpool: &Arc<Mutex<BufferPool>>,
         num_columns: usize,
@@ -32,7 +32,6 @@ impl Table {
         let main_bp_clone = Arc::clone(main_bufferpool);
         let (send, recv) = channel();
         let handle = thread::spawn(move || {
-            let copy_mask = (0b111);
             let num_columns = num_columns;
             let main_bufferpool = main_bp_clone;
             let page_dir = page_dir_clone;
@@ -47,19 +46,32 @@ impl Table {
                 PAGE_SLOTS * PAGE_RANGE_COUNT,
                 BuildHasherDefault::<FxHasher>::default(),
             );
+            let mut rangecounts: FxHashMap<usize, usize> = FxHashMap::with_capacity_and_hasher(
+                PAGE_SLOTS * PAGE_RANGE_COUNT,
+                BuildHasherDefault::<FxHasher>::default(),
+            );
 
             loop {
-                let merge_range = recv.recv();
+                let merge_range = loop {
+                    let range_update = recv.recv();
 
-                if merge_range.is_err() {
-                    return;
-                }
+                    if range_update.is_err() {
+                        return;
+                    }
 
-                main_bufferpool.lock().flush_all();
+                    let range_update: usize = range_update.unwrap();
 
-                let merge_range = merge_range.unwrap();
+                    *rangecounts.entry(range_update).or_default() += 1;
 
-                let range_dir = range_dir.write();
+                    if *rangecounts.get(&range_update).unwrap() >= 4 {
+                        *rangecounts.get_mut(&range_update).unwrap() = 0;
+                        break range_update;
+                    }
+                };
+
+                println!("Merge request received for range {merge_range}");
+
+                let range_dir = range_dir.lock();
                 let range = range_dir.get(merge_range);
                 let merge_from = range.current_tail_page.load(Ordering::SeqCst);
 
@@ -134,10 +146,10 @@ impl Table {
                                 let new_page_dir_entry =
                                     unsafe { new_page_dir_entry.assume_init() };
 
-                                let bp = &mut main_bufferpool.lock();
                                 for i in NUM_STATIC_COLUMNS..(NUM_METADATA_COLUMNS + num_columns) {
-                                    let page = bp.get_page(base_cols[i]);
-                                    let page_copy = bp.get_page(new_page_dir_entry[i]);
+                                    let page = &mut main_bufferpool.lock().get_page(base_cols[i]);
+                                    let page_copy =
+                                        &mut main_bufferpool.lock().get_page(new_page_dir_entry[i]);
 
                                     let page = page
                                         .raw()
@@ -175,7 +187,7 @@ impl Table {
                     tail_page_id = tail_page.read_last_tail(&mut main_bufferpool.lock()) as usize;
                 }
 
-                main_bufferpool.lock().flush_all();
+                //main_bufferpool.lock().flush_all();
 
                 let mut page_dir = page_dir.write();
 
