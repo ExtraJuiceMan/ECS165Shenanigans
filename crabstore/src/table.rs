@@ -529,17 +529,17 @@ impl Table {
             })
             .collect()
     }
-
-    pub fn insert_query(&self, values: &[u64]) {
+    pub fn insert_preval_query(&self, values: &[u64]) -> Option<RID> {
         if self
             .find_row(self.primary_key_index, values[self.primary_key_index])
             .is_some()
         {
-            return;
+            return None;
         }
 
-        let rid: RID = self.next_rid.fetch_add(1, Ordering::Relaxed).into();
-
+        return Some(self.next_rid.fetch_add(1, Ordering::Relaxed).into());
+    }
+    pub fn insert_postval_query(&self, values: &[u64], rid: RID) {
         let page_dir = self.page_dir.read();
 
         let page: Arc<[usize]> = match page_dir.get(rid) {
@@ -608,6 +608,15 @@ impl Table {
             index.update_index(i, values[i], rid);
         }
     }
+    pub fn insert_query(&self, values: &[u64]) -> bool {
+        match self.insert_preval_query(values) {
+            None => false,
+            Some(rid) => {
+                self.insert_postval_query(values, rid);
+                true
+            }
+        }
+    }
 
     pub fn sum_query(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
         let mut sum: u64 = 0;
@@ -627,21 +636,18 @@ impl Table {
 
         sum
     }
-
-    pub fn update_query(&self, key: u64, values: &[Option<u64>]) -> bool {
+    pub fn update_preval_query(&self, key: u64, values: &[Option<u64>]) -> Option<RID> {
         let row = self.find_row(self.primary_key_index, key);
 
         if let Some(pk) = values[self.primary_key_index] {
             if self.find_row(self.primary_key_index, pk).is_some() {
-                return false;
+                return None;
             }
         }
-
-        if row.is_none() {
-            return false;
-        }
-
-        let base_rid = row.unwrap();
+        return row;
+    }
+    pub fn update_postval_query(&self, key: u64, values: &[Option<u64>], row: RID) {
+        let base_rid = row;
         let base_page = self.get_page(base_rid);
         let updated_values = self.merge_values(base_rid, values);
 
@@ -744,8 +750,15 @@ impl Table {
         base_page
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
             .write_slot(base_rid.slot(), tail_rid.raw());
-
-        true
+    }
+    pub fn update_query(&self, key: u64, values: &[Option<u64>]) -> bool {
+        match self.update_preval_query(key, values) {
+            Some(row) => {
+                self.update_postval_query(key, values, row);
+                true
+            }
+            None => false,
+        }
     }
 
     pub fn delete_query(&self, key: u64) -> bool {
