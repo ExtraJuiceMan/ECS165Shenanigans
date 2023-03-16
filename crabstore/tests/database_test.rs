@@ -37,7 +37,7 @@ fn verify() {
 
         new_values[0] = None;
 
-        grades.update_query(i, &new_values);
+        grades.update_query(i, &new_values, None);
     }
 
     let selected = grades.select_query(19965, 0, &[1, 1, 1, 1]);
@@ -103,11 +103,11 @@ fn correctness_tester1() {
     let result = regorganize_result(table.select_query(10, 2, &[1, 1, 1, 1, 1]));
     assert_eq!(result.len(), 0);
 
-    table.update_query(8, &[None, Some(2), Some(2), Some(2), Some(2)]);
+    table.update_query(8, &[None, Some(2), Some(2), Some(2), Some(2)], None);
     let result = regorganize_result(table.select_query(8, 2, &[1, 1, 1, 1, 1]));
     assert_eq!(result.len(), 0);
 
-    table.update_query(7, &[Some(8), Some(2), Some(2), Some(2), Some(2)]);
+    table.update_query(7, &[Some(8), Some(2), Some(2), Some(2), Some(2)], None);
     let result = regorganize_result(table.select_query(7, 0, &[1, 1, 1, 1, 1]));
     assert_eq!(result.len(), 0);
 
@@ -205,7 +205,7 @@ fn durability_tester1(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, ke
                 updated_columns[i] = Some(val);
                 records.get_mut(key).unwrap()[i] = val;
             }
-            table.update_query(*key, &updated_columns);
+            table.update_query(*key, &updated_columns, None);
             let record = &table.select_query(*key, 0, &[1, 1, 1, 1, 1])[0];
             for (i, val) in record.columns.iter().enumerate() {
                 assert_eq!(*val, records.get(key).unwrap()[i]);

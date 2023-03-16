@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use parking_lot::{lock_api::RawRwLock, Mutex, RwLock};
+use parking_lot::{
+    lock_api::{RawRwLock, RawRwLockRecursive},
+    Mutex, RwLock,
+};
 
 use crate::rid::RID;
 
@@ -44,7 +47,7 @@ impl LockManager {
         unsafe {
             match lock_type {
                 LockType::Shared => {
-                    if !lock.raw().try_lock_shared() {
+                    if !lock.raw().try_lock_shared_recursive() {
                         None
                     } else {
                         Some(LockHandle::new(rid, lock_type))

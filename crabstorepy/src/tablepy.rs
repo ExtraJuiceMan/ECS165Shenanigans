@@ -105,7 +105,7 @@ impl TablePy {
             .map(|val| val.extract::<Option<u64>>().unwrap())
             .collect::<Vec<Option<u64>>>();
 
-        py.allow_threads(move || self.0.update_query(key, &vals))
+        py.allow_threads(move || self.0.update_query(key, &vals, None))
     }
 
     pub fn delete(&self, py: Python<'_>, key: u64) -> bool {

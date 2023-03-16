@@ -1,5 +1,6 @@
 use crate::transaction::Transaction;
 
+/*
 struct TransactionWorker {
     transactions: Vec<Transaction>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -33,3 +34,4 @@ impl TransactionWorker {
         self.thread.unwrap().join()
     }
 }
+*/

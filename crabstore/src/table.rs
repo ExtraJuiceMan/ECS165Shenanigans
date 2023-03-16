@@ -261,13 +261,21 @@ impl Table {
     }
 
     #[inline(always)]
-    fn get_page(&self, rid: RID) -> Page {
+    pub fn get_page(&self, rid: RID) -> Page {
         Page::new(self.page_dir.read().get(rid).expect("Page get fail"))
     }
 
     #[inline(always)]
     fn get_page_by_id(&self, id: usize) -> Page {
         Page::new(self.page_dir.read().get_page(id).expect("Page get fail"))
+    }
+
+    pub fn get_bufferpool(&self) -> Arc<Mutex<BufferPool>> {
+        Arc::clone(&self.bufferpool)
+    }
+
+    pub fn get_lock_manager(&self) -> Arc<LockManager> {
+        Arc::clone(&self.lock_manager)
     }
 
     fn find_row(&self, column_index: usize, value: u64) -> Option<RID> {
@@ -612,11 +620,19 @@ impl Table {
         sum
     }
 
-    pub fn update_query(&self, key: u64, values: &[Option<u64>]) -> bool {
+    pub fn update_query(
+        &self,
+        key: u64,
+        values: &[Option<u64>],
+        mut transaction: Option<&mut Transaction>,
+    ) -> bool {
         let row = self.find_row(self.primary_key_index, key);
 
         if let Some(pk) = values[self.primary_key_index] {
             if self.find_row(self.primary_key_index, pk).is_some() {
+                if let Some(t) = transaction.borrow_mut() {
+                    t.set_aborted(false);
+                }
                 return false;
             }
         }
@@ -626,6 +642,13 @@ impl Table {
         }
 
         let base_rid = row.unwrap();
+
+        if let Some(t) = transaction.borrow_mut() {
+            if !t.try_lock_with_abort(&self.lock_manager, base_rid, LockType::Exclusive) {
+                return false;
+            }
+        }
+
         let base_page = self.get_page(base_rid);
         let updated_values = self.merge_values(base_rid, values);
 
@@ -724,6 +747,11 @@ impl Table {
             .write_slot(base_rid.slot(), schema_encoding);
 
         //print!("Update called\n");
+
+        if let Some(t) = transaction.borrow_mut() {
+            t.log_write(METADATA_INDIRECTION, base_rid, old_latest_rid.raw());
+            t.log_write(METADATA_RID, tail_rid, RID_INVALID);
+        }
 
         base_page
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)

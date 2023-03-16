@@ -1,4 +1,8 @@
-use std::{borrow::Borrow, cell::RefCell, sync::Arc};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    cell::RefCell,
+    sync::Arc,
+};
 
 use crate::{
     lock_manager::{LockHandle, LockManager, LockType},
@@ -8,11 +12,12 @@ use crate::{
 
 #[derive(Clone, Debug)]
 struct RecordMutation {
-    modified_entry: RID,
-    original_value: u64,
-    modified_column: usize,
+    pub modified_entry: RID,
+    pub original_value: u64,
+    pub modified_column: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum QueryStatus {
     Idle,
     Executing,
@@ -30,12 +35,18 @@ enum Query {
 }
 
 #[derive(Clone)]
-enum ExecutedQuery {
-    Select { num_locks: usize },
-    Sum { num_locks: usize },
-    Insert { num_locks: usize, num_muts: usize },
-    Update { num_locks: usize, num_muts: usize },
-    Delete { num_locks: usize, num_muts: usize },
+struct ExecutedQuery {
+    pub num_locks: usize,
+    pub num_muts: usize,
+}
+
+impl ExecutedQuery {
+    fn new(num_locks: usize, num_muts: usize) -> Self {
+        ExecutedQuery {
+            num_locks,
+            num_muts,
+        }
+    }
 }
 
 pub struct Transaction {
@@ -65,7 +76,8 @@ impl Transaction {
         self.queries.push((query, table.clone()));
     }
 
-    fn run(&mut self) {
+    fn run(&mut self) -> bool {
+        self.write_log.reserve(self.queries.len());
         self.current_status = QueryStatus::Executing;
 
         for query in self.queries.clone().iter() {
@@ -76,57 +88,98 @@ impl Transaction {
                 Query::Select(search_val, col_idx, selected) => {
                     query.1.select_query(*search_val, *col_idx, selected);
 
-                    self.query_log.push(ExecutedQuery::Select {
-                        num_locks: self.current_locks,
-                    });
+                    self.query_log
+                        .push(ExecutedQuery::new(self.current_locks, self.current_writes));
                 }
                 Query::Sum(start, end, val) => {
                     query.1.sum_query(*start, *end, *val);
 
-                    self.query_log.push(ExecutedQuery::Delete {
-                        num_locks: self.current_locks,
-                        num_muts: self.current_writes,
-                    });
+                    self.query_log
+                        .push(ExecutedQuery::new(self.current_locks, self.current_writes));
                 }
                 Query::Insert(vals) => {
                     query.1.insert_query(vals);
 
-                    self.query_log.push(ExecutedQuery::Insert {
-                        num_locks: self.current_locks,
-                        num_muts: self.current_writes,
-                    });
+                    self.query_log
+                        .push(ExecutedQuery::new(self.current_locks, self.current_writes));
                 }
                 Query::Update(key, vals) => {
-                    query.1.update_query(*key, vals);
+                    query.1.update_query(*key, vals, Some(self));
 
-                    self.query_log.push(ExecutedQuery::Update {
-                        num_locks: self.current_locks,
-                        num_muts: self.current_writes,
-                    });
+                    self.query_log
+                        .push(ExecutedQuery::new(self.current_locks, self.current_writes));
                 }
                 Query::Delete(key) => {
                     query.1.delete_query(*key, Some(self));
 
-                    self.query_log.push(ExecutedQuery::Delete {
-                        num_locks: self.current_locks,
-                        num_muts: self.current_writes,
-                    });
+                    self.query_log
+                        .push(ExecutedQuery::new(self.current_locks, self.current_writes));
                 }
+            }
+
+            match self.current_status {
+                QueryStatus::AbortedNotRetryable | QueryStatus::AbortedRetryable => {
+                    self.rollback();
+                    return false;
+                }
+                _ => {}
+            }
+        }
+
+        self.commit();
+        true
+    }
+
+    fn commit(&mut self) {
+        for idx in (0..self.query_log.len()).rev() {
+            let table = Arc::clone(&self.queries[idx].1);
+            let entry = self.query_log.remove(idx);
+
+            self.write_log.clear();
+
+            for _ in 0..entry.num_locks {
+                let lock = self.locks_acquired.remove(self.locks_acquired.len() - 1);
+                table.get_lock_manager().unlock(lock);
+            }
+        }
+
+        self.current_status = QueryStatus::Idle;
+    }
+
+    fn rollback(&mut self) {
+        for idx in (0..(self.query_log.len())).rev() {
+            let table = Arc::clone(&self.queries[idx].1);
+            let entry = self.query_log.remove(idx);
+
+            let bp = table.get_bufferpool();
+            let mut bpl = bp.lock();
+
+            for _ in 0..entry.num_muts {
+                let write_entry = self.write_log.remove(self.write_log.len() - 1);
+
+                table
+                    .get_page(write_entry.modified_entry)
+                    .get_column(bpl.borrow_mut(), write_entry.modified_column)
+                    .write_slot(
+                        write_entry.modified_entry.slot(),
+                        write_entry.original_value,
+                    );
+            }
+
+            for _ in 0..entry.num_locks {
+                let lock = self.locks_acquired.remove(self.locks_acquired.len() - 1);
+                table.get_lock_manager().unlock(lock);
             }
         }
     }
 
-    fn set_aborted(&mut self, retry: bool) {
+    pub fn set_aborted(&mut self, retry: bool) {
         if retry {
             self.current_status = QueryStatus::AbortedRetryable;
         } else {
             self.current_status = QueryStatus::AbortedNotRetryable;
         }
     }
-
-    fn commit(&mut self) {}
-
-    fn rollback(&mut self) {}
 
     pub fn log_write(&mut self, modified_column: usize, modified_entry: RID, original_value: u64) {
         self.current_writes += 1;
@@ -137,7 +190,7 @@ impl Transaction {
         });
     }
 
-    pub fn try_lock(&mut self, locks: &LockManager, rid: RID, lock_type: LockType) -> bool {
+    fn try_lock(&mut self, locks: &LockManager, rid: RID, lock_type: LockType) -> bool {
         if let Some(handle) = locks.try_lock(rid, lock_type) {
             self.current_locks += 1;
             self.locks_acquired.push(handle);

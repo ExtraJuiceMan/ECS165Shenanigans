@@ -46,7 +46,7 @@ fn merge_test() {
                     update_record[4 - idx] = None;
                 }
 
-                table.update_query(i, &update_record);
+                table.update_query(i, &update_record, None);
             }
         }
         let keys = (0..records_num).choose_multiple(&mut rand, sample_count);
