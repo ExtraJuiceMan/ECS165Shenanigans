@@ -1,10 +1,10 @@
 #![feature(test)]
 extern crate test;
-
 use crabstore::{crabstore::CrabStore, record::Record};
 use rand::prelude::*;
 use std::{collections::HashMap, path::Path};
 use tempfile::tempdir;
+use test::Bencher;
 
 #[test]
 fn verify() {
@@ -14,10 +14,10 @@ fn verify() {
 
     let mut crabstore = CrabStore::new(dir.path().into());
     crabstore.open();
-    let grades = &crabstore.create_table("Grades", 4, 0).table_data;
+    let grades = crabstore.create_table("Grades", 4, 0);
 
     for i in 0..num_records {
-        grades.insert_query(&vec![i, 2, 3, 4]);
+        grades.insert_query(&[i, 2, 3, 4]);
     }
 
     let sum = grades.sum_query(0, num_records, 1);
@@ -58,15 +58,15 @@ fn regorganize_result(result: Vec<Record>) -> Vec<Vec<u64>> {
 
 #[test]
 fn correctness_tester1() {
-    let records = vec![
-        vec![0, 1, 1, 2, 1],
-        vec![1, 1, 1, 1, 2],
-        vec![2, 0, 3, 5, 1],
-        vec![3, 1, 5, 1, 3],
-        vec![4, 2, 7, 1, 1],
-        vec![5, 1, 1, 1, 1],
-        vec![6, 0, 9, 1, 0],
-        vec![7, 1, 1, 1, 1],
+    let records = [
+        [0, 1, 1, 2, 1],
+        [1, 1, 1, 1, 2],
+        [2, 0, 3, 5, 1],
+        [3, 1, 5, 1, 3],
+        [4, 2, 7, 1, 1],
+        [5, 1, 1, 1, 1],
+        [6, 0, 9, 1, 0],
+        [7, 1, 1, 1, 1],
     ];
 
     let dir = tempdir().unwrap();
@@ -74,9 +74,9 @@ fn correctness_tester1() {
     let mut crabstore = CrabStore::new(dir.path().into());
     crabstore.open();
 
-    let table = &crabstore.create_table("test", 5, 0).table_data;
+    let table = crabstore.create_table("test", 5, 0);
 
-    for record in records.clone() {
+    for record in records {
         table.insert_query(&record);
     }
 
@@ -115,16 +115,16 @@ fn correctness_tester1() {
     let result = regorganize_result(table.select_query(5, 0, &[1, 1, 1, 1, 1]));
     assert_eq!(result.len(), 0);
 
-    let table2 = &crabstore.create_table("test2", 5, 0).table_data;
-    let records2 = vec![
-        vec![1, 1, 1, 2, 1],
-        vec![2, 1, 1, 1, 2],
-        vec![3, 0, 3, 5, 1],
-        vec![4, 1, 5, 1, 3],
-        vec![5, 2, 7, 1, 1],
-        vec![6, 1, 1, 1, 1],
-        vec![7, 0, 9, 1, 0],
-        vec![8, 1, 1, 1, 1],
+    let table2 = crabstore.create_table("test2", 5, 0);
+    let records2 = [
+        [1, 1, 1, 2, 1],
+        [2, 1, 1, 1, 2],
+        [3, 0, 3, 5, 1],
+        [4, 1, 5, 1, 3],
+        [5, 2, 7, 1, 1],
+        [6, 1, 1, 1, 1],
+        [7, 0, 9, 1, 0],
+        [8, 1, 1, 1, 1],
     ];
 
     for record in records2.iter() {
@@ -139,22 +139,22 @@ fn correctness_tester1() {
 
 #[test]
 fn correctness_tester2() {
-    let records = vec![
-        vec![1, 1, 0, 2, 1],
-        vec![2, 1, 1, 1, 2],
-        vec![3, 0, 2, 5, 1],
-        vec![4, 1, 3, 1, 3],
-        vec![5, 2, 4, 1, 1],
-        vec![6, 1, 5, 1, 1],
-        vec![7, 0, 6, 1, 0],
-        vec![8, 1, 7, 1, 1],
+    let records = [
+        [1, 1, 0, 2, 1],
+        [2, 1, 1, 1, 2],
+        [3, 0, 2, 5, 1],
+        [4, 1, 3, 1, 3],
+        [5, 2, 4, 1, 1],
+        [6, 1, 5, 1, 1],
+        [7, 0, 6, 1, 0],
+        [8, 1, 7, 1, 1],
     ];
     let dir = tempdir().unwrap();
 
     let mut crabstore = CrabStore::new(dir.path().into());
     crabstore.open();
 
-    let table = &crabstore.create_table("test3", 5, 2).table_data;
+    let table = crabstore.create_table("test3", 5, 2);
 
     for record in records.iter() {
         table.insert_query(record);
@@ -168,11 +168,11 @@ const NUMBER_OF_RECORDS: u64 = 1000;
 const NUMBER_OF_AGGREGATES: u64 = 100;
 const NUMBER_OF_UPDATES: u64 = 1;
 
-fn durability_tester1(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, keys: &[u64]) {
+fn durability_tester1(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, keys: &Vec<u64>) {
     let mut crabstore = CrabStore::new(directory.to_path_buf());
     crabstore.open();
 
-    let table = &crabstore.create_table("Grades", 5, 0).table_data;
+    let table = crabstore.create_table("Grades", 5, 0);
 
     let mut rand = StdRng::seed_from_u64(3562901);
 
@@ -228,11 +228,11 @@ fn durability_tester1(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, ke
     crabstore.close();
 }
 
-fn durability_tester2(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, keys: &[u64]) {
+fn durability_tester2(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, keys: &Vec<u64>) {
     let mut crabstore = CrabStore::new(directory.to_path_buf());
     crabstore.open();
 
-    let table = &crabstore.get_table("Grades").table_data;
+    let table = crabstore.get_table("Grades");
 
     for key in keys.iter() {
         let record = &table.select_query(*key, 0, &[1, 1, 1, 1, 1])[0].columns;

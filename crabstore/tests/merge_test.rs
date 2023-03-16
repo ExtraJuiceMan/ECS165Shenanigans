@@ -1,7 +1,8 @@
 #![feature(test)]
 extern crate test;
-use crabstore::crabstore::CrabStore;
+use crabstore::*;
 use rand::prelude::*;
+use std::{collections::HashMap, path::Path};
 use tempfile::tempdir;
 use test::Bencher;
 
@@ -13,14 +14,14 @@ fn merge_test() {
     let mut crabstore = CrabStore::new(dir.path().into());
     crabstore.open();
 
-    let table = &crabstore.create_table("merge", 5, 0).table_data;
+    let table = crabstore.create_table("merge", 5, 0);
     let update_nums = [2, 4, 8, 16];
     let records_num = 10000;
     let sample_count = 200;
     let select_repeat = 200;
 
     for i in 0..records_num {
-        table.insert_query(&vec![
+        table.insert_query(&[
             i,
             (i + 100) % records_num,
             (i + 200) % records_num,
