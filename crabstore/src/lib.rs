@@ -37,7 +37,6 @@ pub mod lock_manager;
 mod merge;
 pub mod page;
 mod page_directory;
-pub mod query;
 mod range_directory;
 pub mod record;
 pub mod rid;
