@@ -1,6 +1,6 @@
 #![feature(test)]
 extern crate test;
-use crabcore::{crabstore::{CrabStore}, record::Record};
+use crabcore::{crabstore::CrabStore, record::Record};
 use rand::prelude::*;
 use std::{collections::HashMap, path::Path};
 use tempfile::tempdir;
@@ -111,7 +111,7 @@ fn correctness_tester1() {
     let result = regorganize_result(table.select_query(7, 0, &[1, 1, 1, 1, 1]));
     assert_eq!(result.len(), 0);
 
-    table.delete_query(5);
+    table.delete_query(5, None);
     let result = regorganize_result(table.select_query(5, 0, &[1, 1, 1, 1, 1]));
     assert_eq!(result.len(), 0);
 

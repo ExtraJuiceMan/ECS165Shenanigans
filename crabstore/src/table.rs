@@ -1,11 +1,12 @@
 use crate::{
     bufferpool::{BufferPool, BufferPoolFrame},
     disk_manager::DiskManager,
-    lock_manager::LockManager,
+    lock_manager::{LockManager, LockType},
     page::PhysicalPage,
     range_directory::RangeDirectory,
     record::Record,
     rid::RID,
+    transaction::Transaction,
     BUFFERPOOL_SIZE, METADATA_BASE_RID, METADATA_PAGE_HEADER, NUM_STATIC_COLUMNS, PAGE_RANGE_COUNT,
     PAGE_SIZE, PAGE_SLOTS,
 };
@@ -731,7 +732,7 @@ impl Table {
         true
     }
 
-    pub fn delete_query(&self, key: u64) -> bool {
+    pub fn delete_query(&self, key: u64, mut transaction: Option<&mut Transaction>) -> bool {
         let row = self.find_row(self.primary_key_index, key);
 
         if row.is_none() {
@@ -739,6 +740,12 @@ impl Table {
         }
 
         let row = row.unwrap();
+
+        if let Some(t) = transaction.borrow_mut() {
+            if !t.try_lock_with_abort(&self.lock_manager, row, LockType::Exclusive) {
+                return false;
+            }
+        }
 
         let mut next_tail: RID = self
             .get_page(row)
@@ -759,12 +766,17 @@ impl Table {
             next_tail = next.into();
         }
 
+        if let Some(t) = transaction.borrow_mut() {
+            t.log_write(METADATA_RID, row, row.raw());
+        }
+
         self.get_page(row)
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
             .write_slot(row.slot(), RID_INVALID);
 
         true
     }
+
     pub fn build_index(&self, column_num: usize) {
         let mut index = self.index.write();
         index.create_index(column_num);

@@ -109,7 +109,7 @@ impl TablePy {
     }
 
     pub fn delete(&self, py: Python<'_>, key: u64) -> bool {
-        py.allow_threads(move || self.0.delete_query(key))
+        py.allow_threads(move || self.0.delete_query(key, None))
     }
 
     #[pyo3(signature = (*values))]
