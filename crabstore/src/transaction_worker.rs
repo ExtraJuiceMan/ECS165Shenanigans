@@ -1,37 +1,77 @@
-use crate::transaction::Transaction;
+use std::{
+    collections::VecDeque,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize},
+        Arc,
+    },
+};
 
-/*struct TransactionWorker {
-    transactions: Vec<Transaction>,
+use parking_lot::{Condvar, RwLock};
+
+use crate::transaction::{QueryStatus, Transaction};
+
+struct TransactionWorker {
+    transactions: Arc<RwLock<VecDeque<Transaction>>>,
     thread: Option<std::thread::JoinHandle<()>>,
-    loc
+    stats: Arc<RwLock<Vec<bool>>>,
+    result: usize,
 }
+
 impl TransactionWorker {
-    pub fn new(table: Arc<TableData>) -> Self {
-        let thread = None;
+    fn spawn_worker_thread(
+        queue: &Arc<RwLock<VecDeque<Transaction>>>,
+        stats: &Arc<RwLock<Vec<bool>>>,
+    ) -> std::thread::JoinHandle<()> {
+        let queue = Arc::clone(queue);
+        let stats = Arc::clone(stats);
+
+        std::thread::spawn(move || {
+            let mut queue = queue.write();
+            let mut stats = stats.write();
+
+            while !queue.is_empty() {
+                let mut transaction = queue.pop_front().unwrap();
+                let result = transaction.run();
+                stats.push(result);
+
+                if !result && transaction.get_status() == QueryStatus::AbortedRetryable {
+                    queue.push_back(transaction);
+                }
+            }
+        })
+    }
+
+    pub fn new() -> Self {
+        let transactions = Arc::new(RwLock::new(VecDeque::new()));
+
         Self {
-            transactions: Vec::new(),
-            table,
-            thread,
+            transactions,
+            thread: None,
+            stats: Arc::new(RwLock::new(Vec::new())),
+            result: 0,
         }
     }
+
     pub fn add_transaction(&mut self, transaction: Transaction) {
-        self.transactions.push(transaction);
+        self.transactions.write().push_back(transaction);
     }
-    pub fn get_transactions(&self) -> &Vec<Transaction> {
-        &self.transactions
+
+    pub fn run(&mut self) {
+        if self.thread.is_none() {
+            self.thread = Some(TransactionWorker::spawn_worker_thread(
+                &self.transactions,
+                &self.stats,
+            ));
+        }
     }
-    pub fn get_transactions_mut(&mut self) -> &mut Vec<Transaction> {
-        &mut self.transactions
-    }
-    pub fn get_table(&self) -> Arc<TableData> {
-        self.table.clone()
-    }
-    pub fn get_table_mut(&mut self) -> &mut Arc<TableData> {
-        &mut self.table
-    }
-    pub fn join(self) -> std::thread::Result<()> {
-        self.thread.unwrap().join()
+
+    pub fn join(&mut self) {
+        if self.thread.is_none() {
+            return;
+        }
+
+        let handle = std::mem::replace(&mut self.thread, None).unwrap();
+
+        handle.join().unwrap();
     }
 }
-
-*/

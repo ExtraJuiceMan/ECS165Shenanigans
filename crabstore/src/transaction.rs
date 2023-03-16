@@ -17,8 +17,8 @@ struct RecordMutation {
     pub modified_column: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum QueryStatus {
+#[derive(Clone, Debug, PartialEq, Eq, Copy)]
+pub enum QueryStatus {
     Idle,
     Executing,
     AbortedRetryable,
@@ -76,7 +76,7 @@ impl Transaction {
         self.queries.push((query, table.clone()));
     }
 
-    fn run(&mut self) -> bool {
+    pub fn run(&mut self) -> bool {
         self.write_log.reserve(self.queries.len());
         self.current_status = QueryStatus::Executing;
 
@@ -181,6 +181,10 @@ impl Transaction {
         } else {
             self.current_status = QueryStatus::AbortedNotRetryable;
         }
+    }
+
+    pub fn get_status(&self) -> QueryStatus {
+        self.current_status
     }
 
     pub fn log_write(&mut self, modified_column: usize, modified_entry: RID, original_value: u64) {
