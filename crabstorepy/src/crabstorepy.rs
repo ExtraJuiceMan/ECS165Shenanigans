@@ -1,6 +1,6 @@
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 
-use ::crabstore::crabstore::CrabStore;
+use crabcore::crabstore::CrabStore;
 use parking_lot::Mutex;
 use pyo3::prelude::*;
 

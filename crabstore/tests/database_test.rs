@@ -1,6 +1,6 @@
 #![feature(test)]
 extern crate test;
-use crabstore::{crabstore::CrabStore, record::Record};
+use crabcore::{crabstore::{CrabStore}, record::Record};
 use rand::prelude::*;
 use std::{collections::HashMap, path::Path};
 use tempfile::tempdir;

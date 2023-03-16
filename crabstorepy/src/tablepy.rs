@@ -1,6 +1,6 @@
 use std::{path::Path, sync::Arc};
 
-use crabstore::table::Table;
+use crabcore::table::Table;
 use pyo3::{
     prelude::*,
     types::{PyList, PyTuple},

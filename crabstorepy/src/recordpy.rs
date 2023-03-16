@@ -1,4 +1,4 @@
-use crabstore::record::Record;
+use crabcore::record::Record;
 use pyo3::{prelude::*, types::PyList};
 
 #[derive(Clone, Debug)]

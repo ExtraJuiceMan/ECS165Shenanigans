@@ -27,7 +27,7 @@ const RID_INVALID: u64 = !0;
 
 // usually 16, but 32 to
 // allow for shared bufferpool with merge thread
-const BUFFERPOOL_SIZE: usize = 2048;
+const BUFFERPOOL_SIZE: usize = 128;
 
 pub mod bufferpool;
 pub mod crabstore;
