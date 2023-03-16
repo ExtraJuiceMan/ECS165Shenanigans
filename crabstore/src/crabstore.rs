@@ -13,7 +13,7 @@ use rkyv::ser::{
 
 use crate::table::Table;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct CrabStore {
     pub directory: PathBuf,
     tables: HashMap<String, Arc<Table>>,

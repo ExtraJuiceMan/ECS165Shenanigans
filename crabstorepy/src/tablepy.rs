@@ -8,7 +8,6 @@ use pyo3::{
 
 use super::recordpy::RecordPy;
 
-#[derive(Debug)]
 #[pyclass]
 pub struct TablePy(pub Arc<Table>);
 

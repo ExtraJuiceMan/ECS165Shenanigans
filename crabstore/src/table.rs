@@ -1,6 +1,7 @@
 use crate::{
     bufferpool::{BufferPool, BufferPoolFrame},
     disk_manager::DiskManager,
+    lock_manager::LockManager,
     page::PhysicalPage,
     range_directory::RangeDirectory,
     record::Record,
@@ -19,6 +20,7 @@ use crate::{
 use parking_lot::{lock_api::RawMutex, Mutex, RwLock};
 use rkyv::{
     ser::{serializers::BufferSerializer, Serializer},
+    with::Lock,
     Archive, Deserialize, Serialize,
 };
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
@@ -50,7 +52,6 @@ pub struct TableHeaderPage {
     next_tid: u64,
 }
 
-#[derive(Debug)]
 pub struct Table {
     name: String,
     num_columns: usize,
@@ -61,6 +62,7 @@ pub struct Table {
     page_dir: Arc<RwLock<PageDirectory>>,
     range_dir: Arc<Mutex<RangeDirectory>>,
     bufferpool: Arc<Mutex<BufferPool>>,
+    lock_manager: Arc<LockManager>,
     disk: Arc<DiskManager>,
     merge_thread_handle: Mutex<Option<(JoinHandle<()>, Sender<usize>)>>,
 }
@@ -98,6 +100,7 @@ impl Table {
             disk,
             bufferpool,
             merge_thread_handle: Mutex::new(Some(merge_thread_handle)),
+            lock_manager: Arc::new(LockManager::new()),
         }
     }
 
@@ -151,6 +154,7 @@ impl Table {
             next_rid: header.next_rid.into(),
             next_tid: header.next_tid.into(),
             merge_thread_handle: Mutex::new(Some(merge_thread_handle)),
+            lock_manager: Arc::new(LockManager::new()),
         }
     }
 

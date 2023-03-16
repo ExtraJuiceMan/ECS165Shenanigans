@@ -6,7 +6,7 @@ use pyo3::prelude::*;
 
 use super::tablepy::TablePy;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 #[pyclass]
 pub struct CrabStorePy(Arc<Mutex<CrabStore>>);
 

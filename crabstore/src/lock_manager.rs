@@ -8,6 +8,12 @@ pub struct LockManager {
     locks: Mutex<HashMap<RID, RwLock<()>>>,
 }
 
+impl Default for LockManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LockManager {
     pub fn new() -> Self {
         Self {
