@@ -17,7 +17,7 @@ fn verify() {
     let grades = crabstore.create_table("Grades", 4, 0);
 
     for i in 0..num_records {
-        grades.insert_query(&[i, 2, 3, 4]);
+        grades.insert_query(&vec![i, 2, 3, 4]);
     }
 
     let sum = grades.sum_query(0, num_records, 1);
@@ -58,15 +58,15 @@ fn regorganize_result(result: Vec<RecordRust>) -> Vec<Vec<u64>> {
 
 #[test]
 fn correctness_tester1() {
-    let records = [
-        [0, 1, 1, 2, 1],
-        [1, 1, 1, 1, 2],
-        [2, 0, 3, 5, 1],
-        [3, 1, 5, 1, 3],
-        [4, 2, 7, 1, 1],
-        [5, 1, 1, 1, 1],
-        [6, 0, 9, 1, 0],
-        [7, 1, 1, 1, 1],
+    let records = vec![
+        vec![0, 1, 1, 2, 1],
+        vec![1, 1, 1, 1, 2],
+        vec![2, 0, 3, 5, 1],
+        vec![3, 1, 5, 1, 3],
+        vec![4, 2, 7, 1, 1],
+        vec![5, 1, 1, 1, 1],
+        vec![6, 0, 9, 1, 0],
+        vec![7, 1, 1, 1, 1],
     ];
 
     let dir = tempdir().unwrap();
@@ -76,7 +76,7 @@ fn correctness_tester1() {
 
     let table = crabstore.create_table("test", 5, 0);
 
-    for record in records {
+    for record in records.clone() {
         table.insert_query(&record);
     }
 
@@ -116,15 +116,15 @@ fn correctness_tester1() {
     assert_eq!(result.len(), 0);
 
     let table2 = crabstore.create_table("test2", 5, 0);
-    let records2 = [
-        [1, 1, 1, 2, 1],
-        [2, 1, 1, 1, 2],
-        [3, 0, 3, 5, 1],
-        [4, 1, 5, 1, 3],
-        [5, 2, 7, 1, 1],
-        [6, 1, 1, 1, 1],
-        [7, 0, 9, 1, 0],
-        [8, 1, 1, 1, 1],
+    let records2 = vec![
+        vec![1, 1, 1, 2, 1],
+        vec![2, 1, 1, 1, 2],
+        vec![3, 0, 3, 5, 1],
+        vec![4, 1, 5, 1, 3],
+        vec![5, 2, 7, 1, 1],
+        vec![6, 1, 1, 1, 1],
+        vec![7, 0, 9, 1, 0],
+        vec![8, 1, 1, 1, 1],
     ];
 
     for record in records2.iter() {
@@ -139,15 +139,15 @@ fn correctness_tester1() {
 
 #[test]
 fn correctness_tester2() {
-    let records = [
-        [1, 1, 0, 2, 1],
-        [2, 1, 1, 1, 2],
-        [3, 0, 2, 5, 1],
-        [4, 1, 3, 1, 3],
-        [5, 2, 4, 1, 1],
-        [6, 1, 5, 1, 1],
-        [7, 0, 6, 1, 0],
-        [8, 1, 7, 1, 1],
+    let records = vec![
+        vec![1, 1, 0, 2, 1],
+        vec![2, 1, 1, 1, 2],
+        vec![3, 0, 2, 5, 1],
+        vec![4, 1, 3, 1, 3],
+        vec![5, 2, 4, 1, 1],
+        vec![6, 1, 5, 1, 1],
+        vec![7, 0, 6, 1, 0],
+        vec![8, 1, 7, 1, 1],
     ];
     let dir = tempdir().unwrap();
 

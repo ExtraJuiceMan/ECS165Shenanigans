@@ -499,18 +499,18 @@ impl Table {
         search_value: u64,
         column_index: usize,
         included_columns: &[usize],
-    ) {
-        let vals: Vec<RID> = self.find_rows(column_index, search_value);
+    ) -> Vec<RID> {
+        self.find_rows(column_index, search_value)
     }
+    pub fn select_postval_query(
 
     pub fn select_query(
         &self,
         search_value: u64,
         column_index: usize,
         included_columns: &[usize],
+        vals: Vec<RID>,
     ) -> Vec<RecordRust> {
-        let vals: Vec<RID> = self.find_rows(column_index, search_value);
-
         vals.into_iter()
             .map(|rid| {
                 let rid = self.get_latest(rid);
@@ -535,8 +535,16 @@ impl Table {
             })
             .collect()
     }
-
-    pub fn insert_preval_query(&self, values: &[u64]) -> Option<RID> {
+    pub fn select_query(
+        &self,
+        search_value: u64,
+        column_index: usize,
+        included_columns: &[usize],
+    ) -> Vec<RecordRust> {
+        let vals: Vec<RID> = self.find_rows(column_index, search_value);
+        self.select_postval_query(search_value, column_index, included_columns, vals)
+    }
+    pub fn insert_preval_query(&self, values: &Vec<u64>) -> Option<RID> {
         if self
             .find_row(self.primary_key_index, values[self.primary_key_index])
             .is_some()
@@ -603,8 +611,7 @@ impl Table {
             index.update_index(i, values[i], rid);
         }
     }
-
-    pub fn insert_query(&self, values: &[u64]) -> bool {
+    pub fn insert_query(&self, values: &Vec<u64>) -> bool {
         match self.insert_preval_query(values) {
             None => false,
             Some(rid) => {
@@ -737,10 +744,10 @@ impl Table {
             None => false,
         }
     }
-
-    pub fn delete_query(&self, key: u64) -> bool {
-        let row = self.find_row(self.primary_key_index, key);
-
+    pub fn delete_preval_query(&self, key: u64) -> Option<RID> {
+        self.find_row(self.primary_key_index, key)
+    }
+    pub fn delete_postval_query(&self, row: Option<RID>) -> bool {
         if row.is_none() {
             return false;
         }
@@ -772,7 +779,15 @@ impl Table {
 
         true
     }
-
+    pub fn delete_query(&self, key: u64) -> bool {
+        match self.delete_preval_query(key) {
+            Some(row) => {
+                self.delete_postval_query(Some(row));
+                true
+            }
+            None => false,
+        }
+    }
     pub fn undelete_query(&self, row: RID) -> bool {
         let mut next_tail: RID = self
             .get_page(row)

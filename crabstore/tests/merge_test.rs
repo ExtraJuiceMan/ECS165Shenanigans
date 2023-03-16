@@ -21,7 +21,7 @@ fn merge_test() {
     let select_repeat = 200;
 
     for i in 0..records_num {
-        table.insert_query(&[
+        table.insert_query(&vec![
             i,
             (i + 100) % records_num,
             (i + 200) % records_num,
