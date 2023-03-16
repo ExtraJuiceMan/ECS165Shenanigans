@@ -1,9 +1,18 @@
-use std::collections::HashMap;
-
-use parking_lot::{lock_api::RawRwLock, Mutex, RwLock};
-
-use crate::rid::RID;
-
+use crate::{
+    page::Page,
+    query::{Query, QueryEnum},
+    table::TableData,
+};
+use core::time;
+use std::{
+    collections::HashMap,
+    sync::{
+        mpsc::{self, channel, Receiver, Sender},
+        Arc, RwLock,
+    },
+    thread,
+};
+#[derive(Debug)]
 pub struct LockManager {
     locks: Mutex<HashMap<RID, RwLock<()>>>,
 }
