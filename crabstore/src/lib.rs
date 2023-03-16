@@ -59,6 +59,8 @@ mod range_directory;
 pub mod rid;
 pub mod table;
 pub mod tablepy;
+pub mod transaction;
+pub mod transaction_worker;
 use crate::table::Table;
 
 #[derive(Clone, Debug)]
@@ -76,10 +78,7 @@ pub struct RecordRust {
 
 impl RecordRust {
     pub fn new(rid: u64, columns: Vec<u64>) -> Self {
-        RecordRust {
-            rid,
-            columns,
-        }
+        RecordRust { rid, columns }
     }
 
     pub fn from(record: RecordPy) -> Self {
@@ -104,14 +103,7 @@ impl RecordPy {
         for c in record.columns.iter() {
             result_cols.append(c).unwrap();
         }
-        Py::new(
-            py,
-            RecordPy::new(
-                record.rid,
-                result_cols.into(),
-            ),
-        )
-        .unwrap()
+        Py::new(py, RecordPy::new(record.rid, result_cols.into())).unwrap()
     }
 }
 
@@ -119,10 +111,7 @@ impl RecordPy {
 impl RecordPy {
     #[new]
     pub fn new(rid: u64, columns: Py<PyList>) -> Self {
-        RecordPy {
-            rid,
-            columns,
-        }
+        RecordPy { rid, columns }
     }
 
     pub fn __str__(&self) -> String {
@@ -251,7 +240,7 @@ impl CrabStore {
             &CrabStore::range_filename(&self.directory, name),
         ));
         self.tables.insert(name.to_string(), Arc::clone(&table));
-        table
+        table.clone()
     }
 
     pub fn drop_table(&mut self, name: &str) -> bool {
@@ -289,7 +278,7 @@ impl CrabStore {
         CrabStore::persist_table_index(&CrabStore::database_filename(&self.directory), table_names);
 
         for table in self.tables.values() {
-            table.persist();
+            table.table_data.persist();
         }
 
         self.tables.clear();
@@ -444,7 +433,7 @@ mod tests {
         db.open();
 
         db.get_table("test_table");
-        assert_eq!(db.get_table("test_table").columns(), 2);
+        assert_eq!(db.get_table("test_table").table_data.columns(), 2);
 
         db.close();
     }
@@ -457,15 +446,15 @@ mod tests {
         db.open();
         let table1 = db.create_table("test_table", 2, 0);
         let table2 = db.get_table("test_table");
-        table1.insert_query(&vec![1, 2]);
-        table2.insert_query(&vec![3, 4]);
+        table1.table_data.insert_query(&vec![1, 2]);
+        table2.table_data.insert_query(&vec![3, 4]);
         assert_eq!(
-            table1.select_query(1, 0, &[1, 1]),
-            table2.select_query(1, 0, &[1, 1])
+            table1.table_data.select_query(1, 0, &[1, 1]),
+            table2.table_data.select_query(1, 0, &[1, 1])
         );
         assert_eq!(
-            table1.select_query(2, 0, &[1, 1]),
-            table2.select_query(2, 0, &[1, 1])
+            table1.table_data.select_query(2, 0, &[1, 1]),
+            table2.table_data.select_query(2, 0, &[1, 1])
         );
         db.close();
     }

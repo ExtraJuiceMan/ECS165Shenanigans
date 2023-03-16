@@ -14,7 +14,7 @@ fn verify() {
 
     let mut crabstore = CrabStore::new(dir.path().into());
     crabstore.open();
-    let grades = crabstore.create_table("Grades", 4, 0);
+    let grades = &crabstore.create_table("Grades", 4, 0).table_data;
 
     for i in 0..num_records {
         grades.insert_query(&vec![i, 2, 3, 4]);
@@ -74,7 +74,7 @@ fn correctness_tester1() {
     let mut crabstore = CrabStore::new(dir.path().into());
     crabstore.open();
 
-    let table = crabstore.create_table("test", 5, 0);
+    let table = &crabstore.create_table("test", 5, 0).table_data;
 
     for record in records.clone() {
         table.insert_query(&record);
@@ -115,7 +115,7 @@ fn correctness_tester1() {
     let result = regorganize_result(table.select_query(5, 0, &[1, 1, 1, 1, 1]));
     assert_eq!(result.len(), 0);
 
-    let table2 = crabstore.create_table("test2", 5, 0);
+    let table2 = &crabstore.create_table("test2", 5, 0).table_data;
     let records2 = vec![
         vec![1, 1, 1, 2, 1],
         vec![2, 1, 1, 1, 2],
@@ -154,7 +154,7 @@ fn correctness_tester2() {
     let mut crabstore = CrabStore::new(dir.path().into());
     crabstore.open();
 
-    let table = crabstore.create_table("test3", 5, 2);
+    let table = &crabstore.create_table("test3", 5, 2).table_data;
 
     for record in records.iter() {
         table.insert_query(record);
@@ -172,7 +172,7 @@ fn durability_tester1(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, ke
     let mut crabstore = CrabStore::new(directory.to_path_buf());
     crabstore.open();
 
-    let table = crabstore.create_table("Grades", 5, 0);
+    let table = &crabstore.create_table("Grades", 5, 0).table_data;
 
     let mut rand = StdRng::seed_from_u64(3562901);
 
@@ -232,7 +232,7 @@ fn durability_tester2(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, ke
     let mut crabstore = CrabStore::new(directory.to_path_buf());
     crabstore.open();
 
-    let table = crabstore.get_table("Grades");
+    let table = &crabstore.get_table("Grades").table_data;
 
     for key in keys.iter() {
         let record = &table.select_query(*key, 0, &[1, 1, 1, 1, 1])[0].columns;

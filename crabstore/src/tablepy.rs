@@ -9,7 +9,7 @@ use pyo3::{
 use crate::{table::Table, RecordPy};
 
 #[derive(Debug)]
-#[pyclass]
+#[pyclass(unsendable)]
 pub struct TablePy(Table);
 
 impl TablePy {
@@ -48,15 +48,17 @@ impl TablePy {
 impl TablePy {
     #[getter]
     fn num_columns(&self) -> usize {
-        self.0.columns()
+        self.0.table_data.columns()
     }
 
     pub fn sum(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
-        self.0.sum_query(start_range, end_range, column_index)
+        self.0
+            .table_data
+            .sum_query(start_range, end_range, column_index)
     }
 
     pub fn select(&self, search_value: u64, column_index: usize, columns: &PyList) -> Py<PyList> {
-        if column_index >= self.0.columns() {
+        if column_index >= self.0.table_data.columns() {
             return Python::with_gil(|py| -> Py<PyList> { PyList::empty(py).into() });
         }
 
@@ -69,6 +71,7 @@ impl TablePy {
 
         let results = self
             .0
+            .table_data
             .select_query(search_value, column_index, &included_columns);
 
         Python::with_gil(|py| -> Py<PyList> {
@@ -88,11 +91,11 @@ impl TablePy {
             .iter()
             .map(|val| val.extract::<Option<u64>>().unwrap())
             .collect::<Vec<Option<u64>>>();
-        self.0.update_query(key, &vals)
+        self.0.table_data.update_query(key, &vals)
     }
 
     pub fn delete(&self, key: u64) -> bool {
-        self.0.delete_query(key)
+        self.0.table_data.delete_query(key)
     }
 
     #[args(values = "*")]
@@ -101,18 +104,18 @@ impl TablePy {
             .iter()
             .map(|v| v.extract::<u64>().unwrap())
             .collect::<Vec<u64>>();
-        self.0.insert_query(&vals);
+        self.0.table_data.insert_query(&vals);
     }
 
     pub fn build_index(&self, column_num: usize) {
-        self.0.build_index(column_num);
+        self.0.table_data.build_index(column_num);
     }
 
     pub fn drop_index(&self, column_num: usize) {
-        self.0.drop_index(column_num);
+        self.0.table_data.drop_index(column_num);
     }
 
     pub fn persist(&self) {
-        self.0.persist();
+        self.0.table_data.persist();
     }
 }
