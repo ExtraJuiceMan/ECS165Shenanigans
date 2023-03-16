@@ -26,7 +26,7 @@ pub enum QueryStatus {
 }
 
 #[derive(Clone)]
-enum Query {
+pub enum Query {
     Select(u64, usize, Box<[usize]>),
     Sum(u64, u64, usize),
     Insert(Box<[u64]>),
@@ -60,7 +60,7 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Transaction {
             query_log: Vec::new(),
             queries: Vec::new(),
@@ -72,7 +72,7 @@ impl Transaction {
         }
     }
 
-    fn add_query(&mut self, query: Query, table: &Arc<Table>) {
+    pub fn add_query(&mut self, query: Query, table: &Arc<Table>) {
         self.queries.push((query, table.clone()));
     }
 

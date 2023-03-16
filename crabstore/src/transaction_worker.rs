@@ -6,11 +6,11 @@ use std::{
     },
 };
 
-use parking_lot::{Condvar, RwLock};
+use parking_lot::RwLock;
 
 use crate::transaction::{QueryStatus, Transaction};
 
-struct TransactionWorker {
+pub struct TransactionWorker {
     transactions: Arc<RwLock<VecDeque<Transaction>>>,
     thread: Option<std::thread::JoinHandle<()>>,
     stats: Arc<RwLock<Vec<bool>>>,
