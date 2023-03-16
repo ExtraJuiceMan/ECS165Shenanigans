@@ -503,8 +503,6 @@ impl Table {
         self.find_rows(column_index, search_value)
     }
     pub fn select_postval_query(
-
-    pub fn select_query(
         &self,
         search_value: u64,
         column_index: usize,
