@@ -1,7 +1,7 @@
 #![feature(new_uninit)]
 #![feature(map_try_insert)]
 #![feature(get_mut_unchecked)]
-
+#![feature(return_position_impl_trait_in_trait)]
 use dashmap::DashMap;
 use pyo3::{prelude::*, types::PyList};
 use rkyv::ser::{
@@ -50,14 +50,15 @@ const BUFFERPOOL_SIZE: usize = 2048;
 pub mod bufferpool;
 pub mod disk_manager;
 pub mod index;
+pub mod lock_manager;
 mod merge;
 pub mod page;
 mod page_directory;
+pub mod query;
 mod range_directory;
 pub mod rid;
 pub mod table;
 pub mod tablepy;
-
 use crate::table::Table;
 
 #[derive(Clone, Debug)]

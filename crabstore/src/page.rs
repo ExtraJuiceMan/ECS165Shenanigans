@@ -105,7 +105,9 @@ impl Page {
     pub fn get_column(&self, bp: &mut BufferPool, index: usize) -> Arc<BufferPoolFrame> {
         bp.get_page(self.0[index])
     }
-
+    pub fn get_column_mut(&self, bp: &mut BufferPool, index: usize) -> Arc<BufferPoolFrame> {
+        bp.get_page(self.0[index])
+    }
     #[inline(always)]
     pub fn slot(&self, bp: &mut BufferPool, column: usize, rid: RID) -> u64 {
         self.get_column(bp, column).slot(rid.slot())
