@@ -60,9 +60,11 @@ fn merge_test() {
     }
 }
 
+/*
 #[bench]
 fn merge_bench(b: &mut Bencher) {
     b.iter(|| {
         merge_test();
     });
 }
+*/

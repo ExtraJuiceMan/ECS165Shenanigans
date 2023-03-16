@@ -65,39 +65,34 @@ use crate::table::Table;
 #[pyclass(subclass, get_all)]
 pub struct RecordPy {
     rid: u64,
-    indirection: u64,
-    schema_encoding: u64,
     columns: Py<PyList>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RecordRust {
     rid: u64,
-    indirection: u64,
-    schema_encoding: u64,
     pub columns: Vec<u64>,
 }
 
 impl RecordRust {
-    pub fn new(rid: u64, indirection: u64, schema_encoding: u64, columns: Vec<u64>) -> Self {
+    pub fn new(rid: u64, columns: Vec<u64>) -> Self {
         RecordRust {
             rid,
-            indirection,
-            schema_encoding,
             columns,
         }
     }
 
     pub fn from(record: RecordPy) -> Self {
         let mut p = Vec::new();
+
         Python::with_gil(|py| {
             for c in record.columns.as_ref(py).iter() {
                 p.push(c.extract::<u64>().unwrap());
             }
         });
+
         RecordRust {
             rid: record.rid,
-            indirection: record.indirection,
-            schema_encoding: record.schema_encoding,
             columns: p,
         }
     }
@@ -113,8 +108,6 @@ impl RecordPy {
             py,
             RecordPy::new(
                 record.rid,
-                record.indirection,
-                record.schema_encoding,
                 result_cols.into(),
             ),
         )
@@ -125,11 +118,9 @@ impl RecordPy {
 #[pymethods]
 impl RecordPy {
     #[new]
-    pub fn new(rid: u64, indirection: u64, schema_encoding: u64, columns: Py<PyList>) -> Self {
+    pub fn new(rid: u64, columns: Py<PyList>) -> Self {
         RecordPy {
             rid,
-            indirection,
-            schema_encoding,
             columns,
         }
     }
