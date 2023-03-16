@@ -1,10 +1,12 @@
 use crate::{
     bufferpool::{BufferPool, BufferPoolFrame},
     disk_manager::DiskManager,
+    lock_manager::LockManager,
     page::PhysicalPage,
     range_directory::RangeDirectory,
     record::Record,
     rid::RID,
+    transaction_worker::TransactionWorker,
     BUFFERPOOL_SIZE, METADATA_BASE_RID, METADATA_PAGE_HEADER, NUM_STATIC_COLUMNS, PAGE_RANGE_COUNT,
     PAGE_SIZE, PAGE_SLOTS,
 };
@@ -47,9 +49,8 @@ pub struct TableHeaderPage {
     next_rid: u64,
     next_tid: u64,
 }
-
 #[derive(Debug)]
-pub struct Table {
+pub struct TableData {
     name: String,
     num_columns: usize,
     primary_key_index: usize,
@@ -60,9 +61,15 @@ pub struct Table {
     range_dir: Arc<Mutex<RangeDirectory>>,
     bufferpool: Arc<Mutex<BufferPool>>,
     disk: Arc<DiskManager>,
-    merge_thread_handle: Mutex<Option<(JoinHandle<()>, Sender<usize>)>>,
+    merge_thread_handle: Arc<Mutex<Option<(JoinHandle<()>, Sender<usize>)>>>,
 }
-
+#[derive(Debug)]
+pub struct Table {
+    pub table_data: Arc<TableData>,
+    transaction_workers: Arc<RwLock<Vec<TransactionWorker>>>,
+    lock_manager: Arc<Mutex<LockManager>>,
+    merge_thread_handle: Arc<Mutex<Option<(JoinHandle<()>, Sender<usize>)>>>,
+}
 impl Table {
     pub fn new(
         name: String,
@@ -73,6 +80,55 @@ impl Table {
         id_file: &Path,
         rd_file: &Path,
     ) -> Table {
+        let table_data = Arc::new(TableData::new(
+            name,
+            num_columns,
+            key_index,
+            db_file,
+            pd_file,
+            id_file,
+            rd_file,
+        ));
+        let lock_manager = Arc::new(Mutex::new(LockManager::new()));
+        let transaction_workers = Arc::new(RwLock::new(Vec::new()));
+        let merge_thread_handle = Arc::clone(&table_data.merge_thread_handle);
+        Table {
+            table_data,
+            transaction_workers,
+            lock_manager,
+            merge_thread_handle,
+        }
+    }
+
+    pub fn load(
+        name: &str,
+        db_file: &Path,
+        pd_file: &Path,
+        id_file: &Path,
+        rd_file: &Path,
+    ) -> Table {
+        let table_data = Arc::new(TableData::load(name, db_file, pd_file, id_file, rd_file));
+        let lock_manager = Arc::new(Mutex::new(LockManager::new()));
+        let transaction_workers = Arc::new(RwLock::new(Vec::new()));
+        let merge_thread_handle = Arc::clone(&table_data.merge_thread_handle);
+        Table {
+            table_data,
+            transaction_workers,
+            lock_manager,
+            merge_thread_handle,
+        }
+    }
+}
+impl TableData {
+    pub fn new(
+        name: String,
+        num_columns: usize,
+        key_index: usize,
+        db_file: &Path,
+        pd_file: &Path,
+        id_file: &Path,
+        rd_file: &Path,
+    ) -> TableData {
         let page_dir = Arc::new(RwLock::new(PageDirectory::new(pd_file)));
         let range_dir = Arc::new(Mutex::new(RangeDirectory::new(rd_file)));
 
@@ -81,10 +137,15 @@ impl Table {
             Arc::clone(&disk),
             BUFFERPOOL_SIZE,
         )));
-        let merge_thread_handle =
-            Table::spawn_merge_thread(&page_dir, &range_dir, &disk, &bufferpool, num_columns);
+        let merge_thread_handle = Arc::new(Mutex::new(Some(Table::spawn_merge_thread(
+            &page_dir,
+            &range_dir,
+            &disk,
+            &bufferpool,
+            num_columns,
+        ))));
 
-        Table {
+        TableData {
             name,
             num_columns,
             primary_key_index: key_index,
@@ -95,7 +156,7 @@ impl Table {
             range_dir,
             disk,
             bufferpool,
-            merge_thread_handle: Mutex::new(Some(merge_thread_handle)),
+            merge_thread_handle,
         }
     }
 
@@ -128,16 +189,14 @@ impl Table {
             Arc::clone(&disk),
             BUFFERPOOL_SIZE,
         )));
-
-        let merge_thread_handle = Table::spawn_merge_thread(
+        let merge_thread_handle = Arc::new(Mutex::new(Some(Table::spawn_merge_thread(
             &page_dir,
             &range_dir,
             &disk,
             &bufferpool,
             header.num_columns,
-        );
-
-        Table {
+        ))));
+        TableData {
             name: name.into(),
             num_columns: header.num_columns,
             primary_key_index: header.primary_key_index,
@@ -148,7 +207,7 @@ impl Table {
             bufferpool,
             next_rid: header.next_rid.into(),
             next_tid: header.next_tid.into(),
-            merge_thread_handle: Mutex::new(Some(merge_thread_handle)),
+            merge_thread_handle,
         }
     }
 
@@ -844,7 +903,7 @@ impl Table {
     }
 }
 
-impl fmt::Display for Table {
+impl fmt::Display for TableData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "[Table \"{}\"]", self.name)?;
         writeln!(f, "{} Columns: ", self.num_columns)?;

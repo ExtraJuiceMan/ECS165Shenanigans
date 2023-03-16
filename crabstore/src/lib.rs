@@ -82,7 +82,7 @@ mod tests {
         db.open();
 
         db.get_table("test_table");
-        assert_eq!(db.get_table("test_table").columns(), 2);
+        assert_eq!(db.get_table("test_table").table_data.columns(), 2);
 
         db.close();
     }
@@ -95,15 +95,15 @@ mod tests {
         db.open();
         let table1 = db.create_table("test_table", 2, 0);
         let table2 = db.get_table("test_table");
-        table1.insert_query(&vec![1, 2]);
-        table2.insert_query(&vec![3, 4]);
+        table1.table_data.insert_query(&vec![1, 2]);
+        table2.table_data.insert_query(&vec![3, 4]);
         assert_eq!(
-            table1.select_query(1, 0, &[1, 1]),
-            table2.select_query(1, 0, &[1, 1])
+            table1.table_data.select_query(1, 0, &[1, 1]),
+            table2.table_data.select_query(1, 0, &[1, 1])
         );
         assert_eq!(
-            table1.select_query(2, 0, &[1, 1]),
-            table2.select_query(2, 0, &[1, 1])
+            table1.table_data.select_query(2, 0, &[1, 1]),
+            table2.table_data.select_query(2, 0, &[1, 1])
         );
         db.close();
     }

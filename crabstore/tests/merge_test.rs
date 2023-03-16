@@ -13,7 +13,7 @@ fn merge_test() {
     let mut crabstore = CrabStore::new(dir.path().into());
     crabstore.open();
 
-    let table = crabstore.create_table("merge", 5, 0);
+    let table = &crabstore.create_table("merge", 5, 0).table_data;
     let update_nums = [2, 4, 8, 16];
     let records_num = 10000;
     let sample_count = 200;
