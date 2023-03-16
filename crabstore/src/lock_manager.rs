@@ -1,32 +1,41 @@
-/*
-
-use crate::query::{Query, QueryEnum};
 use std::collections::HashMap;
-#[derive(Debug)]
+
+use parking_lot::{lock_api::RawRwLock, Mutex, RwLock};
+
+use crate::rid::RID;
+
 pub struct LockManager {
-    page_demanders: HashMap<usize, QueryEnum>,
+    locks: Mutex<HashMap<RID, RwLock<()>>>,
 }
+
 impl LockManager {
     pub fn new() -> Self {
         Self {
-            page_demanders: HashMap::new(),
+            locks: Mutex::new(HashMap::new()),
         }
     }
-    pub fn lock(&mut self, page_id: usize, query: QueryEnum) {
-        self.page_demanders.insert(page_id, query);
-    }
-    pub fn unlock(&mut self, page_id: usize) {
-        self.page_demanders.remove(&page_id);
-    }
-    pub fn get_demanders(&self, page_id: usize) -> Vec<QueryEnum> {
-        let mut demanders = Vec::new();
-        for (key, value) in &self.page_demanders {
-            if *key == page_id {
-                demanders.push(value.clone());
-            }
-        }
-        demanders
-    }
-}
 
-*/
+    pub fn try_lock_shared(&mut self, rid: RID) -> bool {
+        unsafe {
+            self.locks
+                .lock()
+                .entry(rid)
+                .or_insert(RwLock::new(()))
+                .raw()
+                .try_lock_shared()
+        }
+    }
+
+    pub fn try_lock_exclusive(&mut self, rid: RID) -> bool {
+        unsafe {
+            self.locks
+                .lock()
+                .entry(rid)
+                .or_insert(RwLock::new(()))
+                .raw()
+                .try_lock_exclusive()
+        }
+    }
+
+    pub fn unlock(&mut self, rid: RID) {}
+}
