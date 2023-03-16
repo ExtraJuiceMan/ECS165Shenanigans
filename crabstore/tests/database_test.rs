@@ -17,19 +17,19 @@ fn verify() {
     let grades = crabstore.create_table("Grades", 4, 0);
 
     for i in 0..num_records {
-        grades.insert_query(&[i, 2, 3, 4]);
+        grades.insert_query(&[i, 2, 3, 4], None);
     }
 
-    let sum = grades.sum_query(0, num_records, 1);
+    let sum = grades.sum_query(0, num_records, 1, None);
     assert_eq!(sum, 2 * num_records);
-    let sum = grades.sum_query(0, num_records, 2);
+    let sum = grades.sum_query(0, num_records, 2, None);
     assert_eq!(sum, 3 * num_records);
 
-    let selected = grades.select_query(19999, 0, &[1, 1, 1, 1]);
+    let selected = grades.select_query(19999, 0, &[1, 1, 1, 1], None);
     assert_eq!(selected[0].columns, &[19999, 2, 3, 4]);
 
     for i in 0..num_records {
-        let old_values = &grades.select_query(i, 0, &[1, 1, 1, 1])[0].columns;
+        let old_values = &grades.select_query(i, 0, &[1, 1, 1, 1], None)[0].columns;
         let mut new_values = old_values
             .iter()
             .map(|x| Some(x + i))
@@ -40,7 +40,7 @@ fn verify() {
         grades.update_query(i, &new_values, None);
     }
 
-    let selected = grades.select_query(19965, 0, &[1, 1, 1, 1]);
+    let selected = grades.select_query(19965, 0, &[1, 1, 1, 1], None);
     assert_eq!(selected[0].columns, [19965, 19967, 19968, 19969]);
     drop(grades);
 
@@ -77,11 +77,11 @@ fn correctness_tester1() {
     let table = crabstore.create_table("test", 5, 0);
 
     for record in records {
-        table.insert_query(&record);
+        table.insert_query(&record, None);
     }
 
     table.build_index(2);
-    let result = regorganize_result(table.select_query(1, 2, &[1, 1, 1, 1, 1]));
+    let result = regorganize_result(table.select_query(1, 2, &[1, 1, 1, 1, 1], None));
     assert_eq!(result.len(), 4);
     assert!(result.iter().any(|x| x.eq(&records[0])));
     assert!(result.iter().any(|x| x.eq(&records[1])));
@@ -89,30 +89,30 @@ fn correctness_tester1() {
     assert!(result.iter().any(|x| x.eq(&records[7])));
 
     table.drop_index(2);
-    let result = regorganize_result(table.select_query(3, 2, &[1, 1, 1, 1, 1]));
+    let result = regorganize_result(table.select_query(3, 2, &[1, 1, 1, 1, 1], None));
     assert_eq!(result.len(), 1);
     assert!(result.iter().any(|x| x.eq(&records[2])));
 
-    let result = regorganize_result(table.select_query(1, 2, &[1, 1, 1, 1, 1]));
+    let result = regorganize_result(table.select_query(1, 2, &[1, 1, 1, 1, 1], None));
     assert_eq!(result.len(), 4);
     assert!(result.iter().any(|x| x.eq(&records[0])));
     assert!(result.iter().any(|x| x.eq(&records[1])));
     assert!(result.iter().any(|x| x.eq(&records[5])));
     assert!(result.iter().any(|x| x.eq(&records[7])));
 
-    let result = regorganize_result(table.select_query(10, 2, &[1, 1, 1, 1, 1]));
+    let result = regorganize_result(table.select_query(10, 2, &[1, 1, 1, 1, 1], None));
     assert_eq!(result.len(), 0);
 
     table.update_query(8, &[None, Some(2), Some(2), Some(2), Some(2)], None);
-    let result = regorganize_result(table.select_query(8, 2, &[1, 1, 1, 1, 1]));
+    let result = regorganize_result(table.select_query(8, 2, &[1, 1, 1, 1, 1], None));
     assert_eq!(result.len(), 0);
 
     table.update_query(7, &[Some(8), Some(2), Some(2), Some(2), Some(2)], None);
-    let result = regorganize_result(table.select_query(7, 0, &[1, 1, 1, 1, 1]));
+    let result = regorganize_result(table.select_query(7, 0, &[1, 1, 1, 1, 1], None));
     assert_eq!(result.len(), 0);
 
     table.delete_query(5, None);
-    let result = regorganize_result(table.select_query(5, 0, &[1, 1, 1, 1, 1]));
+    let result = regorganize_result(table.select_query(5, 0, &[1, 1, 1, 1, 1], None));
     assert_eq!(result.len(), 0);
 
     let table2 = crabstore.create_table("test2", 5, 0);
@@ -128,10 +128,10 @@ fn correctness_tester1() {
     ];
 
     for record in records2.iter() {
-        table2.insert_query(record);
+        table2.insert_query(record, None);
     }
 
-    let result = regorganize_result(table2.select_query(1, 0, &[1, 1, 1, 1, 1]));
+    let result = regorganize_result(table2.select_query(1, 0, &[1, 1, 1, 1, 1], None));
 
     assert_eq!(result.len(), 1);
     assert!(result.iter().any(|x| x.eq(&records2[0])));
@@ -157,10 +157,10 @@ fn correctness_tester2() {
     let table = crabstore.create_table("test3", 5, 2);
 
     for record in records.iter() {
-        table.insert_query(record);
+        table.insert_query(record, None);
     }
 
-    let result = table.sum_query(3, 5, 4);
+    let result = table.sum_query(3, 5, 4, None);
     assert_eq!(result, 5);
 }
 
@@ -185,12 +185,12 @@ fn durability_tester1(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, ke
             rand.gen_range(0..20),
             rand.gen_range(0..20),
         ];
-        table.insert_query(&record);
+        table.insert_query(&record, None);
         records.insert(key, record);
     }
 
     for key in keys.iter() {
-        let record = &table.select_query(*key, 0, &[1, 1, 1, 1, 1])[0].columns;
+        let record = &table.select_query(*key, 0, &[1, 1, 1, 1, 1], None)[0].columns;
         for (i, column) in record.iter().enumerate() {
             assert_eq!(*column, records.get(key).unwrap()[i]);
         }
@@ -206,7 +206,7 @@ fn durability_tester1(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, ke
                 records.get_mut(key).unwrap()[i] = val;
             }
             table.update_query(*key, &updated_columns, None);
-            let record = &table.select_query(*key, 0, &[1, 1, 1, 1, 1])[0];
+            let record = &table.select_query(*key, 0, &[1, 1, 1, 1, 1], None)[0];
             for (i, val) in record.columns.iter().enumerate() {
                 assert_eq!(*val, records.get(key).unwrap()[i]);
             }
@@ -235,7 +235,7 @@ fn durability_tester2(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, ke
     let table = crabstore.get_table("Grades");
 
     for key in keys.iter() {
-        let record = &table.select_query(*key, 0, &[1, 1, 1, 1, 1])[0].columns;
+        let record = &table.select_query(*key, 0, &[1, 1, 1, 1, 1], None)[0].columns;
         for (i, column) in record.iter().enumerate() {
             assert_eq!(*column, records.get(key).unwrap()[i]);
         }

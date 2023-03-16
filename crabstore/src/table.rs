@@ -488,8 +488,17 @@ impl Table {
         search_value: u64,
         column_index: usize,
         included_columns: &[usize],
+        mut transaction: Option<&mut Transaction>,
     ) -> Vec<Record> {
         let vals: Vec<RID> = self.find_rows(column_index, search_value);
+
+        if let Some(t) = transaction.borrow_mut() {
+            for rid in vals.iter() {
+                if !t.try_lock_with_abort(&self.lock_manager, *rid, LockType::Shared) {
+                    return Vec::new();
+                }
+            }
+        }
 
         vals.into_iter()
             .map(|rid| {
@@ -522,15 +531,24 @@ impl Table {
             .collect()
     }
 
-    pub fn insert_query(&self, values: &[u64]) {
+    pub fn insert_query(&self, values: &[u64], mut transaction: Option<&mut Transaction>) {
         if self
             .find_row(self.primary_key_index, values[self.primary_key_index])
             .is_some()
         {
+            if let Some(t) = transaction.borrow_mut() {
+                t.set_aborted(false);
+            }
             return;
         }
 
         let rid: RID = self.next_rid.fetch_add(1, Ordering::Relaxed).into();
+
+        if let Some(t) = transaction.borrow_mut() {
+            if !t.try_lock_with_abort(&self.lock_manager, rid, LockType::Shared) {
+                return;
+            }
+        }
 
         let page_dir = self.page_dir.read();
 
@@ -574,6 +592,10 @@ impl Table {
             Some(cols) => cols,
         };
 
+        if let Some(t) = transaction.borrow_mut() {
+            t.log_write(METADATA_RID, rid, RID_INVALID);
+        }
+
         let page = Page::new(page);
         page.get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
             .write_slot(rid.slot(), RID_INVALID);
@@ -601,12 +623,25 @@ impl Table {
         }
     }
 
-    pub fn sum_query(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
+    pub fn sum_query(
+        &self,
+        start_range: u64,
+        end_range: u64,
+        column_index: usize,
+        mut transaction: Option<&mut Transaction>,
+    ) -> u64 {
+        let range = self.find_rows_range(column_index, RangeInclusive::new(start_range, end_range));
+
+        if let Some(t) = transaction.borrow_mut() {
+            for rid in range.iter() {
+                if !t.try_lock_with_abort(&self.lock_manager, *rid, LockType::Shared) {
+                    return 0;
+                }
+            }
+        }
+
         let mut sum: u64 = 0;
-        for rid in self
-            .find_rows_range(column_index, RangeInclusive::new(start_range, end_range))
-            .iter()
-        {
+        for rid in range.iter() {
             let latest = self.get_latest_with_bp(&mut self.bufferpool.lock(), *rid);
             sum += self
                 .get_page(latest)

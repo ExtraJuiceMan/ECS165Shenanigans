@@ -21,13 +21,16 @@ fn merge_test() {
     let select_repeat = 200;
 
     for i in 0..records_num {
-        table.insert_query(&[
-            i,
-            (i + 100) % records_num,
-            (i + 200) % records_num,
-            (i + 300) % records_num,
-            (i + 400) % records_num,
-        ]);
+        table.insert_query(
+            &[
+                i,
+                (i + 100) % records_num,
+                (i + 200) % records_num,
+                (i + 300) % records_num,
+                (i + 400) % records_num,
+            ],
+            None,
+        );
     }
 
     for index in 0..update_nums.len() {
@@ -54,7 +57,7 @@ fn merge_test() {
         while time < select_repeat {
             time += 1;
             for key in keys.iter() {
-                table.select_query(*key, 0, &[1, 1, 1, 1, 1]);
+                table.select_query(*key, 0, &[1, 1, 1, 1, 1], None);
             }
         }
     }

@@ -59,7 +59,7 @@ impl TablePy {
         end_range: u64,
         column_index: usize,
     ) -> u64 {
-        py.allow_threads(move || self.0.sum_query(start_range, end_range, column_index))
+        py.allow_threads(move || self.0.sum_query(start_range, end_range, column_index, None))
     }
 
     pub fn select(
@@ -84,7 +84,7 @@ impl TablePy {
         py.allow_threads(|| {
             results = self
                 .0
-                .select_query(search_value, column_index, &included_columns);
+                .select_query(search_value, column_index, &included_columns, None);
         });
 
         Python::with_gil(|py| -> Py<PyList> {
@@ -119,7 +119,7 @@ impl TablePy {
             .map(|v| v.extract::<u64>().unwrap())
             .collect::<Vec<u64>>();
 
-        py.allow_threads(move || self.0.insert_query(&vals));
+        py.allow_threads(move || self.0.insert_query(&vals, None));
     }
 
     pub fn build_index(&self, column_num: usize) {

@@ -94,15 +94,15 @@ mod tests {
         db.open();
         let table1 = db.create_table("test_table", 2, 0);
         let table2 = db.get_table("test_table");
-        table1.insert_query(&vec![1, 2]);
-        table2.insert_query(&vec![3, 4]);
+        table1.insert_query(&[1, 2], None);
+        table2.insert_query(&[3, 4], None);
         assert_eq!(
-            table1.select_query(1, 0, &[1, 1]),
-            table2.select_query(1, 0, &[1, 1])
+            table1.select_query(1, 0, &[1, 1], None),
+            table2.select_query(1, 0, &[1, 1], None)
         );
         assert_eq!(
-            table1.select_query(2, 0, &[1, 1]),
-            table2.select_query(2, 0, &[1, 1])
+            table1.select_query(2, 0, &[1, 1], None),
+            table2.select_query(2, 0, &[1, 1], None)
         );
         db.close();
     }

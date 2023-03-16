@@ -86,19 +86,21 @@ impl Transaction {
 
             match &query.0 {
                 Query::Select(search_val, col_idx, selected) => {
-                    query.1.select_query(*search_val, *col_idx, selected);
+                    query
+                        .1
+                        .select_query(*search_val, *col_idx, selected, Some(self));
 
                     self.query_log
                         .push(ExecutedQuery::new(self.current_locks, self.current_writes));
                 }
                 Query::Sum(start, end, val) => {
-                    query.1.sum_query(*start, *end, *val);
+                    query.1.sum_query(*start, *end, *val, Some(self));
 
                     self.query_log
                         .push(ExecutedQuery::new(self.current_locks, self.current_writes));
                 }
                 Query::Insert(vals) => {
-                    query.1.insert_query(vals);
+                    query.1.insert_query(vals, Some(self));
 
                     self.query_log
                         .push(ExecutedQuery::new(self.current_locks, self.current_writes));
@@ -131,11 +133,11 @@ impl Transaction {
     }
 
     fn commit(&mut self) {
+        self.write_log.clear();
+
         for idx in (0..self.query_log.len()).rev() {
             let table = Arc::clone(&self.queries[idx].1);
             let entry = self.query_log.remove(idx);
-
-            self.write_log.clear();
 
             for _ in 0..entry.num_locks {
                 let lock = self.locks_acquired.remove(self.locks_acquired.len() - 1);
