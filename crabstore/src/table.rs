@@ -3,6 +3,7 @@ use crate::{
     disk_manager::DiskManager,
     page::PhysicalPage,
     range_directory::RangeDirectory,
+    record::Record,
     rid::RID,
     BUFFERPOOL_SIZE, METADATA_BASE_RID, METADATA_PAGE_HEADER, NUM_STATIC_COLUMNS, PAGE_RANGE_COUNT,
     PAGE_SIZE, PAGE_SLOTS,
@@ -12,13 +13,8 @@ use crate::{
     page::{Page, PageRange},
     page_directory::PageDirectory,
 };
-use crate::{
-    RecordPy, RecordRust, METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING,
-    NUM_METADATA_COLUMNS,
-};
+use crate::{METADATA_INDIRECTION, METADATA_RID, METADATA_SCHEMA_ENCODING, NUM_METADATA_COLUMNS};
 use parking_lot::{lock_api::RawMutex, Mutex, RwLock};
-use pyo3::types::{PyDict, PyList, PyTuple};
-use pyo3::{prelude::*, types::PyCFunction};
 use rkyv::{
     ser::{serializers::BufferSerializer, Serializer},
     Archive, Deserialize, Serialize,
@@ -508,7 +504,7 @@ impl Table {
         column_index: usize,
         included_columns: &[usize],
         vals: Vec<RID>,
-    ) -> Vec<RecordRust> {
+    ) -> Vec<Record> {
         vals.into_iter()
             .map(|rid| {
                 let rid = self.get_latest(rid);
@@ -526,7 +522,7 @@ impl Table {
                     })
                     .collect::<Vec<u64>>();
 
-                RecordRust {
+                Record {
                     rid: rid.raw(),
                     columns: result_cols,
                 }
@@ -538,7 +534,7 @@ impl Table {
         search_value: u64,
         column_index: usize,
         included_columns: &[usize],
-    ) -> Vec<RecordRust> {
+    ) -> Vec<Record> {
         let vals: Vec<RID> = self.find_rows(column_index, search_value);
         self.select_postval_query(search_value, column_index, included_columns, vals)
     }

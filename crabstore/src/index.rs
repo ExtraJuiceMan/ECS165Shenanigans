@@ -1,6 +1,5 @@
 use crate::rid::RID;
 use core::fmt;
-use pyo3::prelude::*;
 use rkyv::{
     de::deserializers::SharedDeserializeMap,
     ser::{
@@ -18,7 +17,6 @@ use std::{
 use std::{fs::File, path::Path};
 
 #[derive(Clone, Debug, Default)]
-#[pyclass(subclass)]
 //change to BTreeMap when we need to implement ranges
 pub struct Index {
     path: PathBuf,

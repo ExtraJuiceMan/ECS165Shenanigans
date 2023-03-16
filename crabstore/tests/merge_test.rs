@@ -1,8 +1,7 @@
 #![feature(test)]
 extern crate test;
-use crabstore::*;
+use crabstore::crabstore::CrabStore;
 use rand::prelude::*;
-use std::{collections::HashMap, path::Path};
 use tempfile::tempdir;
 use test::Bencher;
 

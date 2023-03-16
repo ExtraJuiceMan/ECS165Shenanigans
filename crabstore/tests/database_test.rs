@@ -1,10 +1,10 @@
 #![feature(test)]
 extern crate test;
-use crabstore::*;
+
+use crabstore::{crabstore::CrabStore, record::Record};
 use rand::prelude::*;
 use std::{collections::HashMap, path::Path};
 use tempfile::tempdir;
-use test::Bencher;
 
 #[test]
 fn verify() {
@@ -47,7 +47,7 @@ fn verify() {
     crabstore.close();
 }
 
-fn regorganize_result(result: Vec<RecordRust>) -> Vec<Vec<u64>> {
+fn regorganize_result(result: Vec<Record>) -> Vec<Vec<u64>> {
     let mut val = Vec::with_capacity(result.len());
     for r in result.iter() {
         val.push(r.columns.clone());
@@ -168,7 +168,7 @@ const NUMBER_OF_RECORDS: u64 = 1000;
 const NUMBER_OF_AGGREGATES: u64 = 100;
 const NUMBER_OF_UPDATES: u64 = 1;
 
-fn durability_tester1(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, keys: &Vec<u64>) {
+fn durability_tester1(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, keys: &[u64]) {
     let mut crabstore = CrabStore::new(directory.to_path_buf());
     crabstore.open();
 
@@ -228,7 +228,7 @@ fn durability_tester1(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, ke
     crabstore.close();
 }
 
-fn durability_tester2(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, keys: &Vec<u64>) {
+fn durability_tester2(directory: &Path, records: &mut HashMap<u64, Vec<u64>>, keys: &[u64]) {
     let mut crabstore = CrabStore::new(directory.to_path_buf());
     crabstore.open();
 

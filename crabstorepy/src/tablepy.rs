@@ -1,16 +1,16 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
+use crabstore::table::Table;
 use pyo3::{
-    pyclass, pymethods,
+    prelude::*,
     types::{PyList, PyTuple},
-    Py, Python,
 };
 
-use crate::{table::Table, RecordPy};
+use super::recordpy::RecordPy;
 
 #[derive(Debug)]
 #[pyclass]
-pub struct TablePy(Table);
+pub struct TablePy(pub Arc<Table>);
 
 impl TablePy {
     pub fn new(
@@ -22,7 +22,7 @@ impl TablePy {
         id_file: &Path,
         rd_file: &Path,
     ) -> Self {
-        Self(Table::new(
+        Self(Arc::new(Table::new(
             name,
             num_columns,
             key_index,
@@ -30,7 +30,7 @@ impl TablePy {
             pd_file,
             id_file,
             rd_file,
-        ))
+        )))
     }
 
     pub fn load(
@@ -40,7 +40,9 @@ impl TablePy {
         id_file: &Path,
         rd_file: &Path,
     ) -> Self {
-        Self(Table::load(name, db_file, pd_file, id_file, rd_file))
+        Self(Arc::new(Table::load(
+            name, db_file, pd_file, id_file, rd_file,
+        )))
     }
 }
 
@@ -51,11 +53,23 @@ impl TablePy {
         self.0.columns()
     }
 
-    pub fn sum(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
-        self.0.sum_query(start_range, end_range, column_index)
+    pub fn sum(
+        &self,
+        py: Python<'_>,
+        start_range: u64,
+        end_range: u64,
+        column_index: usize,
+    ) -> u64 {
+        py.allow_threads(move || self.0.sum_query(start_range, end_range, column_index))
     }
 
-    pub fn select(&self, search_value: u64, column_index: usize, columns: &PyList) -> Py<PyList> {
+    pub fn select(
+        &self,
+        py: Python<'_>,
+        search_value: u64,
+        column_index: usize,
+        columns: &PyList,
+    ) -> Py<PyList> {
         if column_index >= self.0.columns() {
             return Python::with_gil(|py| -> Py<PyList> { PyList::empty(py).into() });
         }
@@ -67,9 +81,12 @@ impl TablePy {
             .map(|(i, _x)| i)
             .collect();
 
-        let results = self
-            .0
-            .select_query(search_value, column_index, &included_columns);
+        let mut results = vec![];
+        py.allow_threads(|| {
+            results = self
+                .0
+                .select_query(search_value, column_index, &included_columns);
+        });
 
         Python::with_gil(|py| -> Py<PyList> {
             let selected_records: Py<PyList> = PyList::empty(py).into();
@@ -83,25 +100,27 @@ impl TablePy {
         })
     }
 
-    pub fn update(&self, key: u64, values: &PyTuple) -> bool {
+    pub fn update(&self, py: Python<'_>, key: u64, values: &PyTuple) -> bool {
         let vals: Vec<Option<u64>> = values
             .iter()
             .map(|val| val.extract::<Option<u64>>().unwrap())
             .collect::<Vec<Option<u64>>>();
-        self.0.update_query(key, &vals)
+
+        py.allow_threads(move || self.0.update_query(key, &vals))
     }
 
-    pub fn delete(&self, key: u64) -> bool {
-        self.0.delete_query(key)
+    pub fn delete(&self, py: Python<'_>, key: u64) -> bool {
+        py.allow_threads(move || self.0.delete_query(key))
     }
 
-    #[args(values = "*")]
-    pub fn insert(&self, values: &PyTuple) {
+    #[pyo3(signature = (*values))]
+    pub fn insert(&self, py: Python<'_>, values: &PyTuple) {
         let vals = values
             .iter()
             .map(|v| v.extract::<u64>().unwrap())
             .collect::<Vec<u64>>();
-        self.0.insert_query(&vals);
+
+        py.allow_threads(move || self.0.insert_query(&vals));
     }
 
     pub fn build_index(&self, column_num: usize) {

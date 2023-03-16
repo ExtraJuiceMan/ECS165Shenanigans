@@ -2,8 +2,8 @@ use std::{any::Any, iter::Sum};
 
 use bincode::Error;
 
-use crate::rid::RID;
-use crate::{table::Table, RecordRust};
+use crate::table::Table;
+use crate::{record::Record, rid::RID};
 pub trait Query<Reverse, Output> {
     fn reverse(&mut self, table: &Table) -> Option<Box<Reverse>>;
     fn preval(&mut self, table: &Table) -> &Vec<RID>;
@@ -66,12 +66,12 @@ pub struct SelectQuery {
     included_columns: Vec<usize>,
     preval: Option<Vec<RID>>,
 }
-impl Query<SelectQuery, Vec<RecordRust>> for SelectQuery {
+impl Query<SelectQuery, Vec<Record>> for SelectQuery {
     fn reverse(&mut self, table: &Table) -> Option<Box<SelectQuery>> {
         Option::<Box<SelectQuery>>::None
     }
-    fn run(&mut self, table: &Table) -> Result<Box<Vec<RecordRust>>, QueryError> {
-        let x: Result<Vec<RecordRust>, QueryError> =
+    fn run(&mut self, table: &Table) -> Result<Box<Vec<Record>>, QueryError> {
+        let x: Result<Vec<Record>, QueryError> =
             Ok(table.select_query(self.search_value, self.column_index, &self.included_columns));
         match x {
             Ok(x) => Ok(Box::new(x)),
@@ -89,7 +89,7 @@ impl Query<SelectQuery, Vec<RecordRust>> for SelectQuery {
     }
 }
 pub struct InsertQuery {
-    record: Option<RecordRust>,
+    record: Option<Record>,
     values: Vec<u64>,
     preval: Option<Vec<RID>>,
 }
