@@ -447,13 +447,12 @@ impl Table {
         let rid = self.get_latest(base_rid);
         let page = self.get_page(rid);
 
+        let mut bp = self.bufferpool.lock();
         columns
             .iter()
             .zip(
-                (NUM_METADATA_COLUMNS..(self.num_columns + NUM_METADATA_COLUMNS)).map(|column| {
-                    page.get_column(self.bufferpool.lock().borrow_mut(), column)
-                        .slot(rid.slot())
-                }),
+                (NUM_METADATA_COLUMNS..(self.num_columns + NUM_METADATA_COLUMNS))
+                    .map(|column| page.get_column(&mut bp, column).slot(rid.slot())),
             )
             .map(|(x, y)| match x {
                 None => y,

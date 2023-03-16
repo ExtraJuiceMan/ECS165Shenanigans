@@ -146,10 +146,10 @@ impl Table {
                                 let new_page_dir_entry =
                                     unsafe { new_page_dir_entry.assume_init() };
 
+                                let bp = &mut main_bufferpool.lock();
                                 for i in NUM_STATIC_COLUMNS..(NUM_METADATA_COLUMNS + num_columns) {
-                                    let page = &mut main_bufferpool.lock().get_page(base_cols[i]);
-                                    let page_copy =
-                                        &mut main_bufferpool.lock().get_page(new_page_dir_entry[i]);
+                                    let page = bp.get_page(base_cols[i]);
+                                    let page_copy = bp.get_page(new_page_dir_entry[i]);
 
                                     let page = page
                                         .raw()
