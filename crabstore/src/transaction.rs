@@ -17,6 +17,26 @@ struct RecordMutation {
     pub modified_column: usize,
 }
 
+#[derive(Debug)]
+
+pub enum IndexMutation {
+    Add {
+        rid: RID,
+        value: u64,
+        column: usize,
+    },
+    Remove {
+        rid: RID,
+        old_value: u64,
+        column: usize,
+    },
+}
+
+enum Mutation {
+    Index(IndexMutation),
+    Record(RecordMutation),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub enum QueryStatus {
     Idle,
@@ -52,7 +72,7 @@ impl ExecutedQuery {
 pub struct Transaction {
     query_log: Vec<ExecutedQuery>,
     queries: Vec<(Query, Arc<Table>)>,
-    write_log: Vec<RecordMutation>,
+    write_log: Vec<Mutation>,
     locks_acquired: Vec<LockHandle>,
     current_writes: usize,
     current_locks: usize,
@@ -159,13 +179,27 @@ impl Transaction {
             for _ in 0..entry.num_muts {
                 let write_entry = self.write_log.remove(self.write_log.len() - 1);
 
-                table
-                    .get_page(write_entry.modified_entry)
-                    .get_column(bpl.borrow_mut(), write_entry.modified_column)
-                    .write_slot(
-                        write_entry.modified_entry.slot(),
-                        write_entry.original_value,
-                    );
+                match write_entry {
+                    Mutation::Index(index_entry) => match index_entry {
+                        IndexMutation::Add { rid, value, column } => {
+                            table.index.write().remove_index(column, value, rid)
+                        }
+                        IndexMutation::Remove {
+                            rid,
+                            old_value,
+                            column,
+                        } => table.index.write().update_index(column, old_value, rid),
+                    },
+                    Mutation::Record(write_entry) => {
+                        table
+                            .get_page(write_entry.modified_entry)
+                            .get_column(bpl.borrow_mut(), write_entry.modified_column)
+                            .write_slot(
+                                write_entry.modified_entry.slot(),
+                                write_entry.original_value,
+                            );
+                    }
+                }
             }
 
             for _ in 0..entry.num_locks {
@@ -187,13 +221,18 @@ impl Transaction {
         self.current_status
     }
 
+    pub fn log_index_write(&mut self, mutation: IndexMutation) {
+        self.current_writes += 1;
+        self.write_log.push(Mutation::Index(mutation));
+    }
+
     pub fn log_write(&mut self, modified_column: usize, modified_entry: RID, original_value: u64) {
         self.current_writes += 1;
-        self.write_log.push(RecordMutation {
+        self.write_log.push(Mutation::Record(RecordMutation {
             modified_entry,
             modified_column,
             original_value,
-        });
+        }));
     }
 
     fn try_lock(&mut self, locks: &LockManager, rid: RID, lock_type: LockType) -> bool {

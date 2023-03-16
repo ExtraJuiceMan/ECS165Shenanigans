@@ -6,7 +6,7 @@ use crate::{
     range_directory::RangeDirectory,
     record::Record,
     rid::RID,
-    transaction::Transaction,
+    transaction::{IndexMutation, Transaction},
     BUFFERPOOL_SIZE, METADATA_BASE_RID, METADATA_PAGE_HEADER, NUM_STATIC_COLUMNS, PAGE_RANGE_COUNT,
     PAGE_SIZE, PAGE_SLOTS,
 };
@@ -57,7 +57,7 @@ pub struct Table {
     name: String,
     num_columns: usize,
     primary_key_index: usize,
-    index: RwLock<Index>,
+    pub index: RwLock<Index>,
     next_rid: AtomicU64,
     next_tid: AtomicU64,
     page_dir: Arc<RwLock<PageDirectory>>,
@@ -619,6 +619,14 @@ impl Table {
 
         let mut index = self.index.write();
         for i in 0..self.num_columns {
+            if let Some(t) = transaction.borrow_mut() {
+                t.log_index_write(IndexMutation::Add {
+                    rid,
+                    value: values[i],
+                    column: i,
+                });
+            }
+
             index.update_index(i, values[i], rid);
         }
     }
@@ -745,31 +753,51 @@ impl Table {
                 schema_encoding |= 1 << i;
                 let mut index = self.index.write();
 
+                if let Some(t) = transaction.borrow_mut() {
+                    t.log_index_write(IndexMutation::Add {
+                        rid: base_rid,
+                        value: v.unwrap(),
+                        column: i,
+                    });
+                }
+
                 index.update_index(i, v.unwrap(), base_rid);
                 if (old_schema_encoding & (1 << i)) == 1 || old_latest_rid.is_invalid() {
-                    index.remove_index(
-                        i,
-                        base_page
-                            .get_column(
-                                self.bufferpool.lock().borrow_mut(),
-                                NUM_METADATA_COLUMNS + i,
-                            )
-                            .slot(base_rid.slot()),
-                        base_rid,
-                    );
+                    let val = base_page
+                        .get_column(
+                            self.bufferpool.lock().borrow_mut(),
+                            NUM_METADATA_COLUMNS + i,
+                        )
+                        .slot(base_rid.slot());
+
+                    if let Some(t) = transaction.borrow_mut() {
+                        t.log_index_write(IndexMutation::Remove {
+                            rid: base_rid,
+                            old_value: val,
+                            column: i,
+                        });
+                    }
+
+                    index.remove_index(i, val, base_rid);
                 } else if !old_latest_rid.is_invalid() && (old_schema_encoding & (1 << i)) == 1 {
                     let mut index = self.index.write();
+                    let val = self
+                        .get_page(old_latest_rid)
+                        .get_column(
+                            self.bufferpool.lock().borrow_mut(),
+                            NUM_METADATA_COLUMNS + i,
+                        )
+                        .slot(old_latest_rid.slot());
 
-                    index.remove_index(
-                        i,
-                        self.get_page(old_latest_rid)
-                            .get_column(
-                                self.bufferpool.lock().borrow_mut(),
-                                NUM_METADATA_COLUMNS + i,
-                            )
-                            .slot(old_latest_rid.slot()),
-                        base_rid,
-                    );
+                    if let Some(t) = transaction.borrow_mut() {
+                        t.log_index_write(IndexMutation::Remove {
+                            rid: base_rid,
+                            old_value: val,
+                            column: i,
+                        });
+                    }
+
+                    index.remove_index(i, val, base_rid);
                 }
             }
         }
@@ -821,6 +849,10 @@ impl Table {
                 .get_page(next_tail)
                 .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
                 .slot(next_tail.slot());
+
+            if let Some(t) = transaction.borrow_mut() {
+                t.log_write(METADATA_INDIRECTION, next_tail, next);
+            }
 
             self.get_page(next_tail)
                 .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
