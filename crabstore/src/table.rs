@@ -379,20 +379,33 @@ impl Table {
         {
             Some(vals) => vals,
             None => {
-                let mut rids: Vec<RID> = Vec::new();
                 let mut rid: RID = 0.into();
+                let mut rids = Vec::new();
                 let next_rid = self.next_rid.load(Ordering::Relaxed);
 
                 while rid.raw() < next_rid {
-                    let key = self
-                        .get_page(rid)
-                        .get_column(
-                            self.bufferpool.lock().borrow_mut(),
-                            NUM_METADATA_COLUMNS + self.primary_key_index,
-                        )
-                        .slot(rid.slot());
+                    let page = self.get_page(rid);
 
-                    if range.contains(&key) {
+                    if page
+                        .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
+                        .slot(rid.slot())
+                        == RID_INVALID
+                    {
+                        rid = rid.next();
+                        continue;
+                    }
+
+                    let latest_rid = self.get_latest(rid);
+
+                    if range.contains(
+                        &self
+                            .get_page(latest_rid)
+                            .get_column(
+                                self.bufferpool.lock().borrow_mut(),
+                                NUM_METADATA_COLUMNS + column_index,
+                            )
+                            .slot(latest_rid.slot()),
+                    ) {
                         rids.push(rid);
                     }
 
@@ -412,7 +425,14 @@ impl Table {
                 .get_column(bp.borrow_mut(), METADATA_INDIRECTION)
                 .slot(rid.slot())
     }
-
+    pub fn get_value_rid_page(&self, page: &Page, rid: &RID, index: usize) -> u64 {
+        page.get_column(self.bufferpool.lock().borrow_mut(), index)
+            .slot(rid.slot())
+    }
+    pub fn write_value_rid_page(&self, page: &Page, rid: &RID, index: usize, value: u64) {
+        page.get_column(self.bufferpool.lock().borrow_mut(), index)
+            .write_slot(rid.slot(), value);
+    }
     pub fn get_latest(&self, rid: RID) -> RID {
         let page = self.get_page(rid);
 
@@ -473,7 +493,14 @@ impl Table {
     pub fn primary_key(&self) -> usize {
         self.primary_key_index
     }
-
+    pub fn select_preval_query(
+        &self,
+        search_value: u64,
+        column_index: usize,
+        included_columns: &[usize],
+    ) {
+        let vals: Vec<RID> = self.find_rows(column_index, search_value);
+    }
     pub fn select_query(
         &self,
         search_value: u64,
@@ -617,24 +644,30 @@ impl Table {
             }
         }
     }
-
+    pub fn sum_preval_query(
+        &self,
+        start_range: u64,
+        end_range: u64,
+        column_index: usize,
+    ) -> Vec<RID> {
+        self.find_rows_range(column_index, RangeInclusive::new(start_range, end_range))
+    }
+    pub fn sum_postval_query(&self, rids: &Vec<RID>) -> u64 {
+        rids.iter()
+            .map(|rid| {
+                let latest = self.get_latest(*rid);
+                self.get_page(latest)
+                    .get_column(
+                        self.bufferpool.lock().borrow_mut(),
+                        NUM_METADATA_COLUMNS + self.primary_key_index,
+                    )
+                    .slot(latest.slot())
+            })
+            .sum()
+    }
     pub fn sum_query(&self, start_range: u64, end_range: u64, column_index: usize) -> u64 {
-        let mut sum: u64 = 0;
-        for rid in self
-            .find_rows_range(column_index, RangeInclusive::new(start_range, end_range))
-            .iter()
-        {
-            let latest = self.get_latest_with_bp(&mut self.bufferpool.lock(), *rid);
-            sum += self
-                .get_page(latest)
-                .get_column(
-                    &mut self.bufferpool.lock(),
-                    NUM_METADATA_COLUMNS + column_index,
-                )
-                .slot(latest.slot());
-        }
-
-        sum
+        let rids = self.sum_preval_query(start_range, end_range, column_index);
+        self.sum_postval_query(&rids)
     }
     pub fn update_preval_query(&self, key: u64, values: &[Option<u64>]) -> Option<RID> {
         let row = self.find_row(self.primary_key_index, key);
@@ -792,6 +825,32 @@ impl Table {
         self.get_page(row)
             .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
             .write_slot(row.slot(), RID_INVALID);
+
+        true
+    }
+    pub fn undelete_query(&self, row: RID) -> bool {
+        let mut next_tail: RID = self
+            .get_page(row)
+            .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
+            .slot(row.slot())
+            .into();
+
+        while next_tail.raw() != RID_INVALID && next_tail.raw() != row.raw() {
+            let next = self
+                .get_page(next_tail)
+                .get_column(self.bufferpool.lock().borrow_mut(), METADATA_INDIRECTION)
+                .slot(next_tail.slot());
+
+            self.get_page(next_tail)
+                .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
+                .write_slot(next_tail.slot(), 1);
+
+            next_tail = next.into();
+        }
+
+        self.get_page(row)
+            .get_column(self.bufferpool.lock().borrow_mut(), METADATA_RID)
+            .write_slot(row.slot(), 1);
 
         true
     }
