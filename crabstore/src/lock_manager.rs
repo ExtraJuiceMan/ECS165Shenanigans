@@ -1,7 +1,7 @@
 use std::{collections::HashMap, hash::BuildHasherDefault};
 
 use parking_lot::{
-    lock_api::{RawRwLock, RawRwLockRecursive, RawRwLockUpgrade},
+    lock_api::{RawRwLock, RawRwLockFair, RawRwLockRecursive, RawRwLockUpgrade},
     Mutex, RwLock,
 };
 use rustc_hash::{FxHashMap, FxHasher};
@@ -92,8 +92,8 @@ impl LockManager {
 
         unsafe {
             match lock_handle.lock_type {
-                LockType::Shared => lock.raw().unlock_shared(),
-                LockType::Exclusive => lock.raw().unlock_exclusive(),
+                LockType::Shared => lock.raw().unlock_shared_fair(),
+                LockType::Exclusive => lock.raw().unlock_exclusive_fair(),
             }
         }
     }

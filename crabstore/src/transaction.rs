@@ -4,6 +4,8 @@ use std::{
     sync::Arc,
 };
 
+use rustc_hash::FxHashSet;
+
 use crate::{
     lock_manager::{LockHandle, LockManager, LockType},
     rid::RID,
@@ -98,6 +100,7 @@ impl Transaction {
 
     pub fn run(&mut self) -> bool {
         self.write_log.reserve(self.queries.len());
+        self.locks_acquired.reserve(self.queries.len() * 2);
         self.current_status = QueryStatus::Executing;
 
         for query in self.queries.clone().iter() {

@@ -203,6 +203,8 @@ impl Table {
         let mut range_dir = self.range_dir.lock();
 
         if range_id >= range_dir.next_range_id() {
+            println!("range id {}, {}", range_id, range_dir.next_range_id());
+
             assert!(range_id == range_dir.next_range_id());
 
             let new_page = self.allocate_tail_page();

@@ -59,8 +59,6 @@ impl Table {
                         return;
                     }
 
-                    continue;
-
                     let range_update: usize = range_update.unwrap();
 
                     *rangecounts.entry(range_update).or_default() += 1;
@@ -71,7 +69,7 @@ impl Table {
                     }
                 };
 
-                println!("Merge request received for range {merge_range}");
+                //println!("Merge request received for range {merge_range}");
 
                 let range_dir = range_dir.lock();
                 let range = range_dir.get(merge_range);
