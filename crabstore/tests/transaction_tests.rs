@@ -18,10 +18,10 @@ fn transaction_test() {
     transaction_test2(dir.path());
 }
 
-const NUMBER_OF_RECORDS: u64 = 1000;
+const NUMBER_OF_RECORDS: u64 = 10000;
 const NUMBER_OF_TRANSACTIONS: u64 = 100;
 const NUMBER_OF_OPERATIONS_PER_RECORD: u64 = 10;
-const NUM_THREADS: u64 = 8;
+const NUM_THREADS: u64 = 2;
 
 fn transaction_test2(dir: &Path) {
     let mut rand = StdRng::seed_from_u64(3562901);

@@ -174,6 +174,10 @@ impl Transaction {
         }
 
         self.current_status = QueryStatus::Idle;
+
+        assert!(self.query_log.is_empty());
+        assert!(self.write_log.is_empty());
+        assert!(self.locks_acquired.is_empty());
     }
 
     fn rollback(&mut self) {
@@ -215,6 +219,10 @@ impl Transaction {
                 table.get_lock_manager().unlock(&lock);
             }
         }
+
+        assert!(self.query_log.is_empty());
+        assert!(self.write_log.is_empty());
+        assert!(self.locks_acquired.is_empty());
     }
 
     pub fn set_aborted(&mut self, retry: bool) {

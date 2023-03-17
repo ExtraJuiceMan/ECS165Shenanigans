@@ -13,7 +13,6 @@ const PAGE_RANGE_SIZE: usize = PAGE_SIZE * PAGE_RANGE_COUNT;
 const RANGE_PAGE_COUNT: usize = PAGE_RANGE_SIZE / PAGE_SIZE;
 
 const NUM_METADATA_COLUMNS: usize = 5;
-
 const METADATA_INDIRECTION: usize = 0;
 const METADATA_RID: usize = 1;
 const METADATA_BASE_RID: usize = 2;
