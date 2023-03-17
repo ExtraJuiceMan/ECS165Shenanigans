@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::BuildHasherDefault};
 
 use parking_lot::{
     lock_api::{RawRwLock, RawRwLockRecursive, RawRwLockUpgrade},
     Mutex, RwLock,
 };
+use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::rid::RID;
 
@@ -25,7 +26,7 @@ impl LockHandle {
 }
 
 pub struct LockManager {
-    locks: Mutex<HashMap<RID, RwLock<()>>>,
+    locks: Mutex<FxHashMap<RID, RwLock<()>>>,
 }
 
 impl Default for LockManager {
@@ -37,12 +38,15 @@ impl Default for LockManager {
 impl LockManager {
     pub fn new() -> Self {
         Self {
-            locks: Mutex::new(HashMap::new()),
+            locks: Mutex::new(FxHashMap::with_capacity_and_hasher(
+                4096,
+                BuildHasherDefault::<FxHasher>::default(),
+            )),
         }
     }
 
     pub fn upgrade_shared(&self, handle: &mut LockHandle) -> bool {
-        let mut guard = self.locks.lock();
+        let guard = self.locks.lock();
         let lock = guard.get(&handle.rid).unwrap();
         let locked = unsafe {
             lock.raw().unlock_shared();
