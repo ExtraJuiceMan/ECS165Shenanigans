@@ -54,12 +54,7 @@ impl BufferPoolFrame {
             .read()
             .expect("Couldn't lock physical page, poisoned?");
 
-        let v = page.slot(slot);
-
-        if v == 8614 {
-            println!("WTF");
-        }
-        v
+        page.slot(slot)
     }
 
     pub fn write_slot(&self, slot: usize, value: u64) {
@@ -135,9 +130,9 @@ impl BufferPool {
             if self.frames[i].dirty.load(Ordering::Relaxed)
                 && Arc::strong_count(&self.frames[i]) < 2
             {
+                self.frames[i].flush(self.disk.borrow());
                 self.page_frame_map
                     .remove(&self.frames[i].page_id.load(Ordering::Relaxed));
-                self.frames[i].flush(self.disk.borrow());
             }
         }
         self.disk.flush();

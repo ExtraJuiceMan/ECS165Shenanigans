@@ -139,12 +139,13 @@ impl Transaction {
                 }
             }
 
-            println!(
-                "Current writes: {} Current locks: {}, Thread Id: {:?}",
-                self.current_writes,
-                self.current_locks,
-                std::thread::current().id()
-            );
+            // println!(
+            //     "Current writes: {} Current locks: {} ({} acquired) , Thread Id: {:?}",
+            //     self.current_writes,
+            //     self.current_locks,
+            //     self.locks_acquired.len(),
+            //     std::thread::current().id()
+            // );
 
             match self.current_status {
                 QueryStatus::AbortedNotRetryable | QueryStatus::AbortedRetryable => {
@@ -168,7 +169,7 @@ impl Transaction {
 
             for _ in 0..entry.num_locks {
                 let lock = self.locks_acquired.remove(self.locks_acquired.len() - 1);
-                table.get_lock_manager().unlock(lock);
+                table.get_lock_manager().unlock(&lock);
             }
         }
 
@@ -179,9 +180,6 @@ impl Transaction {
         for idx in (0..(self.query_log.len())).rev() {
             let table = Arc::clone(&self.queries[idx].1);
             let entry = self.query_log.remove(idx);
-
-            let bp = table.get_bufferpool();
-            let mut bpl = bp.lock();
 
             for _ in 0..entry.num_muts {
                 let write_entry = self.write_log.remove(self.write_log.len() - 1);
@@ -200,7 +198,10 @@ impl Transaction {
                     Mutation::Record(write_entry) => {
                         table
                             .get_page(write_entry.modified_entry)
-                            .get_column(bpl.borrow_mut(), write_entry.modified_column)
+                            .get_column(
+                                table.get_bufferpool().lock().borrow_mut(),
+                                write_entry.modified_column,
+                            )
                             .write_slot(
                                 write_entry.modified_entry.slot(),
                                 write_entry.original_value,
@@ -211,7 +212,7 @@ impl Transaction {
 
             for _ in 0..entry.num_locks {
                 let lock = self.locks_acquired.remove(self.locks_acquired.len() - 1);
-                table.get_lock_manager().unlock(lock);
+                table.get_lock_manager().unlock(&lock);
             }
         }
     }
@@ -243,22 +244,33 @@ impl Transaction {
     }
 
     fn try_lock(&mut self, locks: &LockManager, rid: RID, lock_type: LockType) -> bool {
-        if self.has_lock(rid) {
-            return true;
+        let lock = self.locks_acquired.iter_mut().find(|x| x.rid == rid);
+
+        if let Some(l) = lock {
+            if lock_type == LockType::Exclusive && l.lock_type == LockType::Shared {
+                return locks.upgrade_shared(l);
+            } else {
+                return true;
+            }
         }
 
         if let Some(handle) = locks.try_lock(rid, lock_type) {
             self.current_locks += 1;
             self.locks_acquired.push(handle);
+
+            /*
+                            println!(
+                                "Thread {:?} acquired a {:?} lock on {}, now at {} locks",
+                                std::thread::current().id(),
+                                lock_type,
+                                rid.raw(),
+                                self.locks_acquired.len()
+                            );
+            */
             true
         } else {
             false
         }
-    }
-
-    fn has_lock(&mut self, rid: RID) -> bool {
-        println!("{} ", self.locks_acquired.len());
-        self.locks_acquired.iter().any(|x| x.rid == rid)
     }
 
     pub fn try_lock_with_abort(
@@ -268,11 +280,12 @@ impl Transaction {
         lock_type: LockType,
     ) -> bool {
         if !self.try_lock(locks, rid, lock_type) {
-            println!(
-                "Thread {:?} failed to lock on RID {:?}",
-                std::thread::current().id(),
-                rid
-            );
+            // println!(
+            //     "Thread {:?} failed to lock {:?} on RID {:?}",
+            //     std::thread::current().id(),
+            //     lock_type,
+            //     rid
+            // );
             self.set_aborted(true);
             return false;
         }

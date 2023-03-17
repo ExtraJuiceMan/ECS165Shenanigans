@@ -2,6 +2,7 @@
 #![feature(map_try_insert)]
 #![feature(get_mut_unchecked)]
 #![feature(return_position_impl_trait_in_trait)]
+#![feature(thread_id_value)]
 
 use std::mem::size_of;
 

@@ -545,7 +545,7 @@ impl Table {
         let rid: RID = self.next_rid.fetch_add(1, Ordering::Relaxed).into();
 
         if let Some(t) = transaction.borrow_mut() {
-            if !t.try_lock_with_abort(&self.lock_manager, rid, LockType::Shared) {
+            if !t.try_lock_with_abort(&self.lock_manager, rid, LockType::Exclusive) {
                 return;
             }
         }
