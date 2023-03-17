@@ -1,5 +1,6 @@
 use std::{
     collections::VecDeque,
+    process::id,
     sync::{
         atomic::{AtomicBool, AtomicUsize},
         Arc,
@@ -54,6 +55,10 @@ impl TransactionWorker {
 
     pub fn add_transaction(&mut self, transaction: Transaction) {
         self.transactions.write().push_back(transaction);
+    }
+
+    pub fn add_transactions(&mut self, transaction: Vec<Transaction>) {
+        self.transactions.write().extend(transaction);
     }
 
     pub fn run(&mut self) {

@@ -54,7 +54,12 @@ impl BufferPoolFrame {
             .read()
             .expect("Couldn't lock physical page, poisoned?");
 
-        page.slot(slot)
+        let v = page.slot(slot);
+
+        if v == 8614 {
+            println!("WTF");
+        }
+        v
     }
 
     pub fn write_slot(&self, slot: usize, value: u64) {

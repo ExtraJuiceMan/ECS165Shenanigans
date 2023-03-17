@@ -139,6 +139,13 @@ impl Transaction {
                 }
             }
 
+            println!(
+                "Current writes: {} Current locks: {}, Thread Id: {:?}",
+                self.current_writes,
+                self.current_locks,
+                std::thread::current().id()
+            );
+
             match self.current_status {
                 QueryStatus::AbortedNotRetryable | QueryStatus::AbortedRetryable => {
                     self.rollback();
@@ -236,6 +243,10 @@ impl Transaction {
     }
 
     fn try_lock(&mut self, locks: &LockManager, rid: RID, lock_type: LockType) -> bool {
+        if self.has_lock(rid) {
+            return true;
+        }
+
         if let Some(handle) = locks.try_lock(rid, lock_type) {
             self.current_locks += 1;
             self.locks_acquired.push(handle);
@@ -245,6 +256,11 @@ impl Transaction {
         }
     }
 
+    fn has_lock(&mut self, rid: RID) -> bool {
+        println!("{} ", self.locks_acquired.len());
+        self.locks_acquired.iter().any(|x| x.rid == rid)
+    }
+
     pub fn try_lock_with_abort(
         &mut self,
         locks: &LockManager,
@@ -252,6 +268,11 @@ impl Transaction {
         lock_type: LockType,
     ) -> bool {
         if !self.try_lock(locks, rid, lock_type) {
+            println!(
+                "Thread {:?} failed to lock on RID {:?}",
+                std::thread::current().id(),
+                rid
+            );
             self.set_aborted(true);
             return false;
         }

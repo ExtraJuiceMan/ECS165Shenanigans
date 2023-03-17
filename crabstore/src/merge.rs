@@ -59,6 +59,8 @@ impl Table {
                         return;
                     }
 
+                    continue;
+
                     let range_update: usize = range_update.unwrap();
 
                     *rangecounts.entry(range_update).or_default() += 1;

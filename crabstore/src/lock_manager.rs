@@ -13,8 +13,8 @@ pub enum LockType {
 }
 
 pub struct LockHandle {
-    rid: RID,
-    lock_type: LockType,
+    pub rid: RID,
+    pub lock_type: LockType,
 }
 
 impl LockHandle {
